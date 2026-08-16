@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Harness Designer desktop permissions",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-set-title",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-available-monitors",
+    "core:window:allow-primary-monitor",
+    "dialog:default"
+  ]
+}

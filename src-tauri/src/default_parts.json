@@ -1,0 +1,276 @@
+[
+  {
+    "id": "builtin-molex-51021-1200",
+    "name": "PicoBlade 12핀 리셉터클 하우징",
+    "partNumber": "51021-1200",
+    "manufacturer": "Molex",
+    "description": "1.25 mm pitch, 12 circuit receptacle housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "attributes": {
+      "cavities": "12",
+      "pitch": "1.25 mm",
+      "compatibleTerminalPartIds": "[\"builtin-molex-50058-8000\"]",
+      "defaultTerminalPartId": "builtin-molex-50058-8000",
+      "sourceUrl": "https://www.molex.com/en-us/products/part-detail/0510211200"
+    }
+  },
+  {
+    "id": "builtin-molex-50058-8000",
+    "name": "PicoBlade 암 크림프 터미널",
+    "partNumber": "50058-8000",
+    "manufacturer": "Molex",
+    "description": "Female crimp terminal, tin plated phosphor bronze",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "28-32 AWG",
+    "attributes": {
+      "wireRange": "28-32 AWG",
+      "insulationDiameter": "0.50-1.00 mm",
+      "sourceUrl": "https://www.molex.com/en-us/products/part-detail/0500588000"
+    }
+  },
+  {"id":"builtin-molex-51021-0200","name":"PicoBlade 2핀 리셉터클 하우징","partNumber":"51021-0200","manufacturer":"Molex","description":"1.25 mm pitch, 2 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"2","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210200"}},
+  {"id":"builtin-molex-51021-0300","name":"PicoBlade 3핀 리셉터클 하우징","partNumber":"51021-0300","manufacturer":"Molex","description":"1.25 mm pitch, 3 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"3","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210300"}},
+  {"id":"builtin-molex-51021-0400","name":"PicoBlade 4핀 리셉터클 하우징","partNumber":"51021-0400","manufacturer":"Molex","description":"1.25 mm pitch, 4 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"4","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210400"}},
+  {"id":"builtin-molex-51021-0500","name":"PicoBlade 5핀 리셉터클 하우징","partNumber":"51021-0500","manufacturer":"Molex","description":"1.25 mm pitch, 5 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"5","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210500"}},
+  {"id":"builtin-molex-51021-0600","name":"PicoBlade 6핀 리셉터클 하우징","partNumber":"51021-0600","manufacturer":"Molex","description":"1.25 mm pitch, 6 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"6","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210600"}},
+  {"id":"builtin-molex-51021-0700","name":"PicoBlade 7핀 리셉터클 하우징","partNumber":"51021-0700","manufacturer":"Molex","description":"1.25 mm pitch, 7 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"7","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210700"}},
+  {"id":"builtin-molex-51021-0800","name":"PicoBlade 8핀 리셉터클 하우징","partNumber":"51021-0800","manufacturer":"Molex","description":"1.25 mm pitch, 8 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"8","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210800"}},
+  {"id":"builtin-molex-51021-0900","name":"PicoBlade 9핀 리셉터클 하우징","partNumber":"51021-0900","manufacturer":"Molex","description":"1.25 mm pitch, 9 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"9","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510210900"}},
+  {"id":"builtin-molex-51021-1000","name":"PicoBlade 10핀 리셉터클 하우징","partNumber":"51021-1000","manufacturer":"Molex","description":"1.25 mm pitch, 10 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"10","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510211000"}},
+  {"id":"builtin-molex-51021-1100","name":"PicoBlade 11핀 리셉터클 하우징","partNumber":"51021-1100","manufacturer":"Molex","description":"1.25 mm pitch, 11 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"11","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510211100"}},
+  {"id":"builtin-molex-51021-1300","name":"PicoBlade 13핀 리셉터클 하우징","partNumber":"51021-1300","manufacturer":"Molex","description":"1.25 mm pitch, 13 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"13","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510211300"}},
+  {"id":"builtin-molex-51021-1400","name":"PicoBlade 14핀 리셉터클 하우징","partNumber":"51021-1400","manufacturer":"Molex","description":"1.25 mm pitch, 14 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"14","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510211400"}},
+  {"id":"builtin-molex-51021-1500","name":"PicoBlade 15핀 리셉터클 하우징","partNumber":"51021-1500","manufacturer":"Molex","description":"1.25 mm pitch, 15 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"15","pitch":"1.25 mm","compatibleTerminalPartIds":"[\"builtin-molex-50058-8000\"]","defaultTerminalPartId":"builtin-molex-50058-8000","sourceUrl":"https://www.molex.com/en-us/products/part-detail/510211500"}},
+  {"id":"builtin-molex-43030-0001","name":"Micro-Fit 3.0 암 크림프 터미널","partNumber":"43030-0001","manufacturer":"Molex","description":"Female tin-plated crimp terminal for 20-24 AWG wire","revision":"CATALOG","category":"terminal","unit":"ea","gauge":"20-24 AWG","attributes":{"wireRange":"20-24 AWG","insulationDiameter":"1.85 mm max.","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430300001"}},
+  {"id":"builtin-molex-43025-0200","name":"Micro-Fit 3.0 2핀 리셉터클 하우징","partNumber":"43025-0200","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 2 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"2","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430250200"}},
+  {"id":"builtin-molex-43025-0400","name":"Micro-Fit 3.0 4핀 리셉터클 하우징","partNumber":"43025-0400","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 4 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"4","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430250400"}},
+  {"id":"builtin-molex-43025-0600","name":"Micro-Fit 3.0 6핀 리셉터클 하우징","partNumber":"43025-0600","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 6 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"6","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430250600"}},
+  {"id":"builtin-molex-43025-0800","name":"Micro-Fit 3.0 8핀 리셉터클 하우징","partNumber":"43025-0800","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 8 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"8","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430250800"}},
+  {"id":"builtin-molex-43025-1000","name":"Micro-Fit 3.0 10핀 리셉터클 하우징","partNumber":"43025-1000","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 10 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"10","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430251000"}},
+  {"id":"builtin-molex-43025-1200","name":"Micro-Fit 3.0 12핀 리셉터클 하우징","partNumber":"43025-1200","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 12 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"12","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430251200"}},
+  {"id":"builtin-molex-43025-1400","name":"Micro-Fit 3.0 14핀 리셉터클 하우징","partNumber":"43025-1400","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 14 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"14","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430251400"}},
+  {"id":"builtin-molex-43025-1600","name":"Micro-Fit 3.0 16핀 리셉터클 하우징","partNumber":"43025-1600","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 16 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"16","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430251600"}},
+  {"id":"builtin-molex-43025-1800","name":"Micro-Fit 3.0 18핀 리셉터클 하우징","partNumber":"43025-1800","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 18 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"18","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430251800"}},
+  {"id":"builtin-molex-43025-2000","name":"Micro-Fit 3.0 20핀 리셉터클 하우징","partNumber":"43025-2000","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 20 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"20","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430252000"}},
+  {"id":"builtin-molex-43025-2200","name":"Micro-Fit 3.0 22핀 리셉터클 하우징","partNumber":"43025-2200","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 22 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"22","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430252200"}},
+  {"id":"builtin-molex-43025-2400","name":"Micro-Fit 3.0 24핀 리셉터클 하우징","partNumber":"43025-2400","manufacturer":"Molex","description":"3.00 mm pitch, dual-row 24 circuit receptacle housing","revision":"CATALOG","category":"housing","unit":"ea","attributes":{"cavities":"24","pitch":"3.00 mm","rows":"2","compatibleTerminalPartIds":"[\"builtin-molex-43030-0001\"]","defaultTerminalPartId":"builtin-molex-43030-0001","sourceUrl":"https://www.molex.com/en-us/products/part-detail/430252400"}},
+  {
+    "id": "builtin-te-828904-1",
+    "name": "JPT 단선 방수 씰",
+    "partNumber": "828904-1",
+    "manufacturer": "TE Connectivity",
+    "description": "Blue silicone single wire seal",
+    "revision": "CATALOG",
+    "category": "seal",
+    "unit": "ea",
+    "color": "Light Blue",
+    "attributes": {
+      "wireCrossSection": "0.35-1.00 mm²",
+      "wireDiameter": "1.20-2.10 mm",
+      "sourceUrl": "https://www.te.com/en/product-828904-1.html"
+    }
+  },
+  {
+    "id": "builtin-belden-83008",
+    "name": "고온용 20 AWG 훅업 와이어",
+    "partNumber": "83008",
+    "manufacturer": "Belden",
+    "description": "20 AWG silver plated copper, TFE insulation, 600 V",
+    "revision": "CATALOG",
+    "category": "wire",
+    "unit": "m",
+    "color": "BK",
+    "gauge": "20 AWG",
+    "attributes": {
+      "outerDiameterMm": "1.5",
+      "temperature": "200 °C",
+      "sourceUrl": "https://www.belden.com/products/cable/electronic-wire-cable/lead-wire-hook-up-wire/83008"
+    }
+  },
+  {
+    "id": "builtin-belden-8723",
+    "name": "22 AWG 2페어 실드 케이블",
+    "partNumber": "8723",
+    "manufacturer": "Belden",
+    "description": "Two individually Beldfoil shielded twisted pairs, PVC jacket",
+    "revision": "CATALOG",
+    "category": "cable",
+    "unit": "m",
+    "color": "Chrome",
+    "gauge": "22 AWG",
+    "attributes": {
+      "construction": "shieldedMultiCore",
+      "coreCount": "4",
+      "outerDiameterMm": "4.06",
+      "coreDiameterMm": "1.2",
+      "breakoutLengthMm": "30",
+      "coreColors": "[\"BK\",\"RD\",\"GN\",\"WH\"]",
+      "shield": "Individual Beldfoil, 100% coverage",
+      "shieldConstruction": "Individual Beldfoil, 100% coverage",
+      "shieldCount": "2",
+      "drainWireGauge": "24 AWG",
+      "drainWireColor": "BARE",
+      "sourceUrl": "https://www.belden.com/products/cable/electronic-wire-cable/multi-pair-cable/8723"
+    }
+  },
+  {"id":"builtin-belden-8442","name":"22 AWG 2코어 비실드 케이블","partNumber":"8442","manufacturer":"Belden","description":"2 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"2","outerDiameterMm":"4.32","coreDiameterMm":"1.5","breakoutLengthMm":"30","coreColors":"[\"BK\",\"RD\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8442"}},
+  {"id":"builtin-belden-8443","name":"22 AWG 3코어 비실드 케이블","partNumber":"8443","manufacturer":"Belden","description":"3 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"3","outerDiameterMm":"4.37","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"RD\",\"GN\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8443"}},
+  {"id":"builtin-belden-8444","name":"22 AWG 4코어 비실드 케이블","partNumber":"8444","manufacturer":"Belden","description":"4 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"4","outerDiameterMm":"4.70","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8444"}},
+  {"id":"builtin-belden-8445","name":"22 AWG 5코어 비실드 케이블","partNumber":"8445","manufacturer":"Belden","description":"5 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"5","outerDiameterMm":"4.93","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8445"}},
+  {"id":"builtin-belden-9430","name":"22 AWG 7코어 비실드 케이블","partNumber":"9430","manufacturer":"Belden","description":"7 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"7","outerDiameterMm":"5.44","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9430"}},
+  {"id":"builtin-belden-9421","name":"22 AWG 8코어 비실드 케이블","partNumber":"9421","manufacturer":"Belden","description":"8 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"8","outerDiameterMm":"5.82","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9421"}},
+  {"id":"builtin-belden-9423","name":"22 AWG 9코어 비실드 케이블","partNumber":"9423","manufacturer":"Belden","description":"9 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"9","outerDiameterMm":"6.20","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9423"}},
+  {"id":"builtin-belden-8456","name":"22 AWG 10코어 비실드 케이블","partNumber":"8456","manufacturer":"Belden","description":"10 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"10","outerDiameterMm":"6.71","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8456"}},
+  {"id":"builtin-belden-8457","name":"22 AWG 12코어 비실드 케이블","partNumber":"8457","manufacturer":"Belden","description":"12 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"12","outerDiameterMm":"6.91","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8457"}},
+  {"id":"builtin-belden-8458","name":"22 AWG 15코어 비실드 케이블","partNumber":"8458","manufacturer":"Belden","description":"15 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"15","outerDiameterMm":"8.00","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8458"}},
+  {"id":"builtin-belden-9431","name":"22 AWG 20코어 비실드 케이블","partNumber":"9431","manufacturer":"Belden","description":"20 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"20","outerDiameterMm":"8.76","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\",\"BK/RD\",\"WH/RD\",\"OR/RD\",\"BU/RD\",\"RD/GN\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9431"}},
+  {"id":"builtin-belden-8459","name":"22 AWG 25코어 비실드 케이블","partNumber":"8459","manufacturer":"Belden","description":"25 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"25","outerDiameterMm":"9.83","coreDiameterMm":"1.3","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\",\"BK/RD\",\"WH/RD\",\"OR/RD\",\"BU/RD\",\"RD/GN\",\"OR/GN\",\"BK/WH/RD\",\"WH/BK/RD\",\"RD/BK/WH\",\"GN/BK/WH\"]","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/8459"}},
+  {"id":"builtin-belden-9432","name":"22 AWG 30코어 비실드 케이블","partNumber":"9432","manufacturer":"Belden","description":"30 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"30","outerDiameterMm":"10.16","coreDiameterMm":"1.3","breakoutLengthMm":"30","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9432"}},
+  {"id":"builtin-belden-9433","name":"22 AWG 40코어 비실드 케이블","partNumber":"9433","manufacturer":"Belden","description":"40 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"40","outerDiameterMm":"11.56","coreDiameterMm":"1.3","breakoutLengthMm":"30","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9433"}},
+  {"id":"builtin-belden-9434","name":"22 AWG 50코어 비실드 케이블","partNumber":"9434","manufacturer":"Belden","description":"50 conductor 22 AWG tinned copper, PVC insulation and jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"22 AWG","attributes":{"construction":"multiCore","coreCount":"50","outerDiameterMm":"12.70","coreDiameterMm":"1.3","breakoutLengthMm":"30","shield":"None","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9434"}},
+  {"id":"builtin-belden-8760","name":"18 AWG 2코어 실드 케이블","partNumber":"8760","manufacturer":"Belden","description":"1 twisted pair with overall Beldfoil shield and PVC jacket","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"18 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"2","outerDiameterMm":"5.64","coreDiameterMm":"2.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"CL\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"20 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-pair-cable/8760"}},
+  {"id":"builtin-belden-9533","name":"24 AWG 3코어 실드 케이블","partNumber":"9533","manufacturer":"Belden","description":"3 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"3","outerDiameterMm":"4.11","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9533"}},
+  {"id":"builtin-belden-9534","name":"24 AWG 4코어 실드 케이블","partNumber":"9534","manufacturer":"Belden","description":"4 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"4","outerDiameterMm":"4.67","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9534"}},
+  {"id":"builtin-belden-9535","name":"24 AWG 5코어 실드 케이블","partNumber":"9535","manufacturer":"Belden","description":"5 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"5","outerDiameterMm":"4.80","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9535"}},
+  {"id":"builtin-belden-9536","name":"24 AWG 6코어 실드 케이블","partNumber":"9536","manufacturer":"Belden","description":"6 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"6","outerDiameterMm":"5.31","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\",\"BU\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9536"}},
+  {"id":"builtin-belden-9537","name":"24 AWG 7코어 실드 케이블","partNumber":"9537","manufacturer":"Belden","description":"7 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"7","outerDiameterMm":"5.31","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\",\"BU\",\"OR\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9537"}},
+  {"id":"builtin-belden-9538","name":"24 AWG 8코어 실드 케이블","partNumber":"9538","manufacturer":"Belden","description":"8 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"8","outerDiameterMm":"5.69","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\",\"BU\",\"OR\",\"YE\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9538"}},
+  {"id":"builtin-belden-9539","name":"24 AWG 9코어 실드 케이블","partNumber":"9539","manufacturer":"Belden","description":"9 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"9","outerDiameterMm":"6.20","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\",\"BU\",\"OR\",\"YE\",\"VT\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9539"}},
+  {"id":"builtin-belden-9540","name":"24 AWG 10코어 실드 케이블","partNumber":"9540","manufacturer":"Belden","description":"10 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"10","outerDiameterMm":"6.20","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"BR\",\"BU\",\"OR\",\"YE\",\"VT\",\"GY\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9540"}},
+  {"id":"builtin-belden-9541","name":"24 AWG 15코어 실드 케이블","partNumber":"9541","manufacturer":"Belden","description":"15 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"15","outerDiameterMm":"7.21","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9541"}},
+  {"id":"builtin-belden-9542","name":"24 AWG 20코어 실드 케이블","partNumber":"9542","manufacturer":"Belden","description":"20 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"20","outerDiameterMm":"7.98","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\",\"BK/RD\",\"WH/RD\",\"OR/RD\",\"BU/RD\",\"RD/GN\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9542"}},
+  {"id":"builtin-belden-9543","name":"24 AWG 25코어 실드 케이블","partNumber":"9543","manufacturer":"Belden","description":"25 conductor RS-232 cable with overall Beldfoil shield","revision":"CATALOG","category":"cable","unit":"m","color":"Chrome","gauge":"24 AWG","attributes":{"construction":"shieldedMultiCore","coreCount":"25","outerDiameterMm":"8.61","coreDiameterMm":"1.1","breakoutLengthMm":"30","coreColors":"[\"BK\",\"WH\",\"RD\",\"GN\",\"OR\",\"BU\",\"WH/BK\",\"RD/BK\",\"GN/BK\",\"OR/BK\",\"BU/BK\",\"BK/WH\",\"RD/WH\",\"GN/WH\",\"BU/WH\",\"BK/RD\",\"WH/RD\",\"OR/RD\",\"BU/RD\",\"RD/GN\",\"OR/GN\",\"BK/WH/RD\",\"WH/BK/RD\",\"RD/BK/WH\",\"GN/BK/WH\"]","shield":"Overall Beldfoil, 100% coverage","shieldConstruction":"Overall Beldfoil, 100% coverage","shieldCount":"1","drainWireGauge":"24 AWG","drainWireColor":"BARE","sourceUrl":"https://www.belden.com/products/cable/electronic-wire-cable/multi-conductor-cable/9543"}},
+  {
+    "id": "builtin-te-rnf-100-1-4-0-sp",
+    "name": "RNF-100 1/4인치 수축튜브",
+    "partNumber": "RNF-100-1/4-0-SP",
+    "manufacturer": "TE Connectivity",
+    "description": "Black 2:1 single-wall heat-shrink tubing",
+    "revision": "CATALOG",
+    "category": "heatShrink",
+    "unit": "ea",
+    "color": "BK",
+    "attributes": {
+      "expandedDiameterMm": "6.4",
+      "finishedDiameterMm": "3.2",
+      "lengthMm": "40",
+      "shrinkRatio": "2:1",
+      "sourceUrl": "https://www.te.com/en/product-5053094080.html"
+    }
+  },
+  {
+    "id": "builtin-hellermann-170-40600",
+    "name": "HEGPA66 6 mm 편조 슬리브",
+    "partNumber": "170-40600",
+    "manufacturer": "HellermannTyton",
+    "description": "Abrasion-resistant polyamide 6.6 braided sleeving",
+    "revision": "CATALOG",
+    "category": "sleeve",
+    "unit": "m",
+    "color": "BK",
+    "attributes": {
+      "nominalDiameterMm": "6",
+      "bundleDiameterMm": "4-8",
+      "sourceUrl": "https://www.hellermanntyton.com/products/open-woven-sleeves/hegpa6606/170-40600"
+    }
+  },
+  {
+    "id": "builtin-3m-1181",
+    "name": "1181 동박 실드 테이프",
+    "partNumber": "1181",
+    "manufacturer": "3M",
+    "description": "Copper foil shielding tape with conductive acrylic adhesive",
+    "revision": "CATALOG",
+    "category": "shield",
+    "unit": "m",
+    "attributes": {
+      "backingThickness": "1.4 mil",
+      "material": "Copper foil",
+      "sourceUrl": "https://www.3m.com/3M/en_US/p/d/b5005158005/"
+    }
+  },
+  {
+    "id": "builtin-3m-super-33-plus",
+    "name": "Scotch Super 33+ 전기 절연 테이프",
+    "partNumber": "Super 33+",
+    "manufacturer": "3M",
+    "description": "Professional-grade black vinyl electrical tape",
+    "revision": "CATALOG",
+    "category": "tape",
+    "unit": "m",
+    "color": "BK",
+    "attributes": {
+      "widthMm": "19",
+      "thicknessMm": "0.178",
+      "sourceUrl": "https://www.3m.com/3M/en_US/p/d/b10014694/"
+    }
+  },
+  {
+    "id": "builtin-brady-m21-750-499",
+    "name": "M21 나일론 케이블 라벨",
+    "partNumber": "M21-750-499",
+    "manufacturer": "Brady",
+    "description": "0.75 inch B-499 nylon cloth label cartridge",
+    "revision": "CATALOG",
+    "category": "label",
+    "unit": "ea",
+    "color": "Black on White",
+    "attributes": {
+      "width": "0.75 in",
+      "material": "B-499 Nylon Cloth",
+      "sourceUrl": "https://www.bradyid.com/wire-cable-labels/bmp21-plus-series-multi-purpose-nylon-labels-cps-brus-11832?part-number=m21-750-499"
+    }
+  },
+  {
+    "id": "builtin-hellermann-151-00982",
+    "name": "MSC2 스테인리스 에지 클립",
+    "partNumber": "151-00982",
+    "manufacturer": "HellermannTyton",
+    "description": "SS304 edge clip for 5.0-7.6 mm cable",
+    "revision": "CATALOG",
+    "category": "clip",
+    "unit": "ea",
+    "attributes": {
+      "cableDiameterMm": "5.0-7.6",
+      "panelThicknessMm": "1.0-3.0",
+      "sourceUrl": "https://www.hellermanntyton.com/products/clips-clamps-and-plugs/msc2/151-00982"
+    }
+  },
+  {
+    "id": "builtin-te-321051",
+    "name": "SOLISTRAND 플래그 링 러그",
+    "partNumber": "321051",
+    "manufacturer": "TE Connectivity",
+    "description": "Closed ring tongue flag terminal for #10 stud",
+    "revision": "CATALOG",
+    "category": "lug",
+    "unit": "ea",
+    "gauge": "8 AWG",
+    "attributes": {
+      "studDiameterMm": "5",
+      "wireRange": "8 AWG",
+      "sourceUrl": "https://www.te.com/en/product-321051.html"
+    }
+  },
+  {
+    "id": "builtin-te-320559",
+    "name": "PIDG 절연 버트 스플라이스",
+    "partNumber": "320559",
+    "manufacturer": "TE Connectivity",
+    "description": "Red fully-insulated copper butt splice",
+    "revision": "CATALOG",
+    "category": "splice",
+    "unit": "ea",
+    "color": "Red",
+    "gauge": "22-16 AWG",
+    "attributes": {
+      "wireRange": "22-16 AWG",
+      "wireCrossSection": "0.3-1.42 mm²",
+      "sourceUrl": "https://www.te.com/en/product-320559.html"
+    }
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Harness Designer",
+  "version": "0.1.0",
+  "identifier": "com.harnessdesigner.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Harness Designer",
+        "width": 1600,
+        "height": 920,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "resources": {
+      "../node_modules/occt-import-js/LICENSE.md": "licenses/occt-import-js-LGPL-2.1.txt",
+      "../node_modules/occt-import-js/dist/license.occt.txt": "licenses/OpenCASCADE-LGPL-2.1-exception.txt",
+      "../node_modules/three/LICENSE": "licenses/three-MIT.txt"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}
