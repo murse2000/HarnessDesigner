@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessNode, PartSnapshot } from "./types";
-import { createPinsFromPart, getCompatibleTerminalIds, getPartName, getPartPinCount, nextConnectorReference, resolvePinTermination } from "./parts";
+import { createPinsFromPart, getCompatibleClampIds, getCompatibleTerminalIds, getPartName, getPartPinCount, isConnectorClampPart, nextConnectorReference, resolvePinTermination } from "./parts";
 
 const housing: PartSnapshot = {
   id: "housing-1",
@@ -11,7 +11,7 @@ const housing: PartSnapshot = {
   revision: "A",
   category: "housing",
   unit: "ea",
-  attributes: { cavities: "4", compatibleTerminalPartIds: "[\"terminal-1\"]", defaultTerminalPartId: "terminal-1" },
+  attributes: { cavities: "4", compatibleTerminalPartIds: "[\"terminal-1\"]", compatibleClampPartIds: "[\"clamp-1\"]", defaultTerminalPartId: "terminal-1" },
 };
 
 describe("커넥터 부품 정보", () => {
@@ -21,6 +21,8 @@ describe("커넥터 부품 정보", () => {
     expect(createPinsFromPart(housing).map((pin) => pin.number)).toEqual(["1", "2", "3", "4"]);
     expect(createPinsFromPart(housing).every((pin) => pin.terminalPartId === "terminal-1")).toBe(true);
     expect(getCompatibleTerminalIds(housing)).toEqual(["terminal-1"]);
+    expect(getCompatibleClampIds(housing)).toEqual(["clamp-1"]);
+    expect(isConnectorClampPart({ ...housing, category: "clip", attributes: { accessoryType: "connectorClamp" } })).toBe(true);
   });
 
   it("핀맵을 배치할 때마다 새 핀 ID로 복제한다", () => {

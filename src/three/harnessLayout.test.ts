@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleHarness } from "../domain/sample";
-import { getCompactCoilLayout, layoutHarnessNodes } from "./harnessLayout";
+import { getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "./harnessLayout";
 
 describe("layoutHarnessNodes", () => {
   it("2D 배치 방향을 유지하면서 구간의 실제 mm 길이를 사용한다", () => {
@@ -39,5 +39,14 @@ describe("layoutHarnessNodes", () => {
     expect(getCompactCoilLayout(450, 180)?.turns).toBe(1);
     expect(getCompactCoilLayout(3000, 180)?.turns).toBe(2);
     expect(getCompactCoilLayout(10000, 180)?.turns).toBe(3);
+  });
+
+  it("3D 경로 제어점을 구간 상대 좌표로 저장하고 다시 복원한다", () => {
+    const start = { x: 10, y: 5, z: 20 };
+    const end = { x: 110, y: 5, z: 20 };
+    const routePoint = { t: 0.4, offsetX: 30, offsetY: 15 };
+    const position = positionHarnessRoutePoint(start, end, routePoint);
+    expect(position).toEqual({ x: 50, y: 20, z: 50 });
+    expect(projectHarnessRoutePoint(start, end, position)).toEqual(routePoint);
   });
 });

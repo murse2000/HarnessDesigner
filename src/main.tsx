@@ -5,6 +5,7 @@ import "@fontsource/noto-sans-kr/500.css";
 import "@fontsource/noto-sans-kr/600.css";
 import "@fontsource/noto-sans-kr/700.css";
 import App from "./App";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import "./styles.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><AppErrorBoundary><App /></AppErrorBoundary></React.StrictMode>);

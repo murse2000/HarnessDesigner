@@ -115,7 +115,11 @@ pub struct HarnessSegment {
     pub shield_part_id: Option<String>,
     pub tape_part_id: Option<String>,
     #[serde(default)]
+    pub bend_radius_mm: Option<f64>,
+    #[serde(default)]
     pub drawing_route: Option<CableDrawingRoute>,
+    #[serde(default)]
+    pub three_d_route: Option<ThreeDRoute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +131,21 @@ pub struct CableDrawingRoute {
     pub source_breakout_length: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_breakout_length: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreeDRoute {
+    #[serde(default)]
+    pub control_points: Vec<ThreeDRoutePoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreeDRoutePoint {
+    pub t: f64,
+    pub offset_x: f64,
+    pub offset_y: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +162,8 @@ pub struct Termination {
     pub seal_part_id: Option<String>,
     pub lug_part_id: Option<String>,
     pub allowance_mm: f64,
+    #[serde(default)]
+    pub strip_length_mm: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,7 +188,132 @@ pub struct Conductor {
     #[serde(default)]
     pub cable_core_id: Option<String>,
     #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub current_a: Option<f64>,
+    #[serde(default)]
+    pub voltage_v: Option<f64>,
+    #[serde(default)]
+    pub override_length_mm: Option<f64>,
+    #[serde(default)]
     pub drawing_route: Option<ConductorDrawingRoute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManufacturingRules {
+    pub bundle_packing_factor: f64,
+    pub max_bundle_fill_percent: f64,
+    pub min_bend_radius_multiplier: f64,
+    pub max_voltage_drop_percent: f64,
+    pub require_unused_cavity_seal: bool,
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    #[serde(default)]
+    pub labor_rate_per_hour: f64,
+    #[serde(default)]
+    pub overhead_percent: f64,
+}
+
+fn default_currency() -> String {
+    "KRW".into()
+}
+
+impl Default for ManufacturingRules {
+    fn default() -> Self {
+        Self {
+            bundle_packing_factor: 0.7,
+            max_bundle_fill_percent: 80.0,
+            min_bend_radius_multiplier: 6.0,
+            max_voltage_drop_percent: 3.0,
+            require_unused_cavity_seal: false,
+            currency: "KRW".into(),
+            labor_rate_per_hour: 0.0,
+            overhead_percent: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInstruction {
+    pub id: String,
+    pub harness_id: String,
+    pub sequence: u32,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    #[serde(default)]
+    pub estimated_minutes: f64,
+    #[serde(default)]
+    pub part_id: Option<String>,
+    #[serde(default)]
+    pub image_data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EquipmentProfile {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub delimiter: String,
+    pub include_header: bool,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessVariant {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub disabled_conductor_ids: Vec<String>,
+    #[serde(default)]
+    pub disabled_accessory_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemHarnessInstance {
+    pub id: String,
+    pub harness_id: String,
+    pub reference: String,
+    pub quantity: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemAssembly {
+    pub id: String,
+    pub name: String,
+    pub reference: String,
+    #[serde(default)]
+    pub harness_instances: Vec<SystemHarnessInstance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMember {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewComment {
+    pub id: String,
+    #[serde(default)]
+    pub harness_id: Option<String>,
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    pub author: String,
+    pub message: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub resolved_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,7 +328,10 @@ pub struct AccessoryPlacement {
     pub id: String,
     pub part_id: String,
     pub quantity: f64,
+    #[serde(default)]
     pub segment_id: Option<String>,
+    #[serde(default)]
+    pub node_id: Option<String>,
     pub note: String,
 }
 
@@ -194,6 +343,8 @@ pub struct HarnessAssembly {
     pub name: String,
     pub revision: String,
     #[serde(default)]
+    pub release_status: Option<String>,
+    #[serde(default)]
     pub nodes: Vec<HarnessNode>,
     #[serde(default)]
     pub segments: Vec<HarnessSegment>,
@@ -201,6 +352,81 @@ pub struct HarnessAssembly {
     pub conductors: Vec<Conductor>,
     #[serde(default)]
     pub accessories: Vec<AccessoryPlacement>,
+    #[serde(default)]
+    pub drawing_notes: String,
+    #[serde(default)]
+    pub drawing_table_offsets: HashMap<String, Point>,
+    #[serde(default)]
+    pub drawing_annotations: Vec<DrawingAnnotation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrawingAnnotation {
+    pub id: String,
+    pub kind: String,
+    pub text: String,
+    pub position: Point,
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub image_data_url: Option<String>,
+    #[serde(default)]
+    pub z_index: Option<i32>,
+    #[serde(default)]
+    pub flipped_x: Option<bool>,
+    #[serde(default)]
+    pub flipped_y: Option<bool>,
+    #[serde(default)]
+    pub fill_color: Option<String>,
+    #[serde(default)]
+    pub stroke_color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessReleaseRecord {
+    pub id: String,
+    pub harness_id: String,
+    pub revision: String,
+    pub released_at: String,
+    pub released_by: String,
+    pub note: String,
+    pub fingerprint: String,
+    pub snapshot: HarnessAssembly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityTestExecutionRow {
+    pub conductor_id: String,
+    pub harness_id: String,
+    pub harness_number: String,
+    pub reference: String,
+    pub from_connector: String,
+    pub from_pin: String,
+    pub to_connector: String,
+    pub to_pin: String,
+    pub color: String,
+    pub gauge: String,
+    pub cable_core: String,
+    pub expected: String,
+    pub result: String,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessTestRun {
+    pub id: String,
+    pub harness_id: String,
+    pub harness_number: String,
+    pub revision: String,
+    pub serial_number: String,
+    pub operator: String,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub rows: Vec<ContinuityTestExecutionRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +458,24 @@ pub struct ProjectDocument {
     pub parts: Vec<PartSnapshot>,
     #[serde(default)]
     pub harnesses: Vec<HarnessAssembly>,
+    #[serde(default)]
+    pub release_history: Vec<HarnessReleaseRecord>,
+    #[serde(default)]
+    pub test_runs: Vec<HarnessTestRun>,
+    #[serde(default)]
+    pub manufacturing_rules: ManufacturingRules,
+    #[serde(default)]
+    pub work_instructions: Vec<WorkInstruction>,
+    #[serde(default)]
+    pub equipment_profiles: Vec<EquipmentProfile>,
+    #[serde(default)]
+    pub variants: Vec<HarnessVariant>,
+    #[serde(default)]
+    pub systems: Vec<SystemAssembly>,
+    #[serde(default)]
+    pub members: Vec<ProjectMember>,
+    #[serde(default)]
+    pub review_comments: Vec<ReviewComment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,11 +527,75 @@ pub struct CutExportRow {
     pub color: String,
     pub gauge: String,
     pub length_mm: f64,
+    #[serde(default)]
+    pub start_strip_length_mm: Option<f64>,
+    #[serde(default)]
+    pub end_strip_length_mm: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityTestExportRow {
+    pub harness_number: String,
+    pub reference: String,
+    pub from_connector: String,
+    pub from_pin: String,
+    pub to_connector: String,
+    pub to_pin: String,
+    pub color: String,
+    pub gauge: String,
+    pub cable_core: String,
+    pub expected: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityTestResultExportRow {
+    pub harness_number: String,
+    pub revision: String,
+    pub serial_number: String,
+    pub operator: String,
+    pub started_at: String,
+    pub completed_at: String,
+    pub reference: String,
+    pub from_connector: String,
+    pub from_pin: String,
+    pub to_connector: String,
+    pub to_pin: String,
+    pub expected: String,
+    pub result: String,
+    pub note: String,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Conductor, HarnessSegment};
+    use super::{Conductor, HarnessAssembly, HarnessSegment};
+
+    #[test]
+    fn harness_drawing_notes_round_trip_and_legacy_default() {
+        let legacy = r#"{"id":"h1","number":"HNS-001","name":"Harness","revision":"A"}"#;
+        let legacy_harness: HarnessAssembly = serde_json::from_str(legacy).unwrap();
+        assert!(legacy_harness.drawing_notes.is_empty());
+        assert!(legacy_harness.drawing_table_offsets.is_empty());
+        assert!(legacy_harness.drawing_annotations.is_empty());
+
+        let json = r#"{"id":"h1","number":"HNS-001","name":"Harness","revision":"A","drawingNotes":"체결 확인\n연속성 검사","drawingTableOffsets":{"notes":{"x":20,"y":10}},"drawingAnnotations":[{"id":"a1","kind":"label","text":"검사 완료","position":{"x":120,"y":80},"width":140,"height":36}]}"#;
+        let harness: HarnessAssembly = serde_json::from_str(json).unwrap();
+        assert_eq!(harness.drawing_notes, "체결 확인\n연속성 검사");
+        assert_eq!(harness.drawing_table_offsets["notes"].x, 20.0);
+        assert!(serde_json::to_string(&harness)
+            .unwrap()
+            .contains("drawingNotes"));
+        assert!(serde_json::to_string(&harness)
+            .unwrap()
+            .contains("drawingTableOffsets"));
+        assert_eq!(harness.drawing_annotations[0].text, "검사 완료");
+        assert!(serde_json::to_string(&harness)
+            .unwrap()
+            .contains("drawingAnnotations"));
+    }
 
     #[test]
     fn conductor_drawing_route_round_trip_and_legacy_default() {
@@ -296,7 +604,9 @@ mod tests {
         assert_eq!(conductor.drawing_route.as_ref().unwrap().bend_x, 412.0);
         assert_eq!(conductor.cable_run_id.as_deref(), Some("cable-run-1"));
         assert_eq!(conductor.cable_core_id.as_deref(), Some("1"));
-        assert!(serde_json::to_string(&conductor).unwrap().contains("\"drawingRoute\":{\"bendX\":412.0}"));
+        assert!(serde_json::to_string(&conductor)
+            .unwrap()
+            .contains("\"drawingRoute\":{\"bendX\":412.0}"));
 
         let legacy = json
             .replace(",\"cableRunId\":\"cable-run-1\",\"cableCoreId\":\"1\"", "")
@@ -309,17 +619,29 @@ mod tests {
 
     #[test]
     fn cable_drawing_route_round_trip_and_legacy_default() {
-        let json = r#"{"id":"segment-1","fromNodeId":"j1","toNodeId":"j2","lengthMm":300,"label":"CBL-001","cablePartId":"cable-part","sleevePartId":null,"shieldPartId":null,"tapePartId":null,"drawingRoute":{"offsetX":20,"offsetY":80,"sourceBreakoutLength":40,"targetBreakoutLength":60}}"#;
+        let json = r#"{"id":"segment-1","fromNodeId":"j1","toNodeId":"j2","lengthMm":300,"label":"CBL-001","cablePartId":"cable-part","sleevePartId":null,"shieldPartId":null,"tapePartId":null,"drawingRoute":{"offsetX":20,"offsetY":80,"sourceBreakoutLength":40,"targetBreakoutLength":60},"threeDRoute":{"controlPoints":[{"t":0.5,"offsetX":30,"offsetY":10}]}}"#;
         let segment: HarnessSegment = serde_json::from_str(json).unwrap();
         let route = segment.drawing_route.as_ref().unwrap();
         assert_eq!(route.offset_x, 20.0);
         assert_eq!(route.offset_y, 80.0);
         assert_eq!(route.source_breakout_length, Some(40.0));
         assert_eq!(route.target_breakout_length, Some(60.0));
-        assert!(serde_json::to_string(&segment).unwrap().contains("\"sourceBreakoutLength\":40.0,\"targetBreakoutLength\":60.0"));
+        assert!(serde_json::to_string(&segment)
+            .unwrap()
+            .contains("\"sourceBreakoutLength\":40.0,\"targetBreakoutLength\":60.0"));
+        assert_eq!(
+            segment.three_d_route.as_ref().unwrap().control_points[0].offset_x,
+            30.0
+        );
+        assert!(serde_json::to_string(&segment)
+            .unwrap()
+            .contains("\"threeDRoute\""));
 
-        let legacy = json.replace(",\"drawingRoute\":{\"offsetX\":20,\"offsetY\":80,\"sourceBreakoutLength\":40,\"targetBreakoutLength\":60}", "");
+        let legacy = json
+            .replace(",\"drawingRoute\":{\"offsetX\":20,\"offsetY\":80,\"sourceBreakoutLength\":40,\"targetBreakoutLength\":60}", "")
+            .replace(",\"threeDRoute\":{\"controlPoints\":[{\"t\":0.5,\"offsetX\":30,\"offsetY\":10}]}", "");
         let legacy_segment: HarnessSegment = serde_json::from_str(&legacy).unwrap();
         assert!(legacy_segment.drawing_route.is_none());
+        assert!(legacy_segment.three_d_route.is_none());
     }
 }

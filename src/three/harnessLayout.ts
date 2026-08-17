@@ -1,9 +1,43 @@
-import type { HarnessAssembly } from "../domain/types";
+import type { HarnessAssembly, HarnessSegment } from "../domain/types";
 
 export interface HarnessPoint3 {
   x: number;
   y: number;
   z: number;
+}
+
+export type HarnessRoutePoint3 = NonNullable<HarnessSegment["threeDRoute"]>["controlPoints"][number];
+
+export function positionHarnessRoutePoint(start: HarnessPoint3, end: HarnessPoint3, point: HarnessRoutePoint3): HarnessPoint3 {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dz = end.z - start.z;
+  const horizontalLength = Math.hypot(dx, dz);
+  const sideX = horizontalLength > 0.001 ? -dz / horizontalLength : 0;
+  const sideZ = horizontalLength > 0.001 ? dx / horizontalLength : 1;
+  return {
+    x: start.x + dx * point.t + sideX * point.offsetX,
+    y: start.y + dy * point.t + point.offsetY,
+    z: start.z + dz * point.t + sideZ * point.offsetX,
+  };
+}
+
+export function projectHarnessRoutePoint(start: HarnessPoint3, end: HarnessPoint3, position: HarnessPoint3): HarnessRoutePoint3 {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dz = end.z - start.z;
+  const lengthSquared = dx * dx + dy * dy + dz * dz;
+  const rawT = lengthSquared > 0.001 ? ((position.x - start.x) * dx + (position.y - start.y) * dy + (position.z - start.z) * dz) / lengthSquared : 0.5;
+  const t = Math.min(0.95, Math.max(0.05, rawT));
+  const horizontalLength = Math.hypot(dx, dz);
+  const sideX = horizontalLength > 0.001 ? -dz / horizontalLength : 0;
+  const sideZ = horizontalLength > 0.001 ? dx / horizontalLength : 1;
+  const baseline = { x: start.x + dx * t, y: start.y + dy * t, z: start.z + dz * t };
+  return {
+    t,
+    offsetX: (position.x - baseline.x) * sideX + (position.z - baseline.z) * sideZ,
+    offsetY: position.y - baseline.y,
+  };
 }
 
 export function getCompactCoilLayout(cableLengthMm: number, displayLengthMm: number) {

@@ -27,7 +27,18 @@ export function getPartPinCount(part: PartSnapshot): number {
 }
 
 export function getCompatibleTerminalIds(part: PartSnapshot): string[] {
-  const value = part.attributes.compatibleTerminalPartIds;
+  return parsePartIds(part.attributes.compatibleTerminalPartIds);
+}
+
+export function getCompatibleClampIds(part: PartSnapshot): string[] {
+  return parsePartIds(part.attributes.compatibleClampPartIds);
+}
+
+export function isConnectorClampPart(part: PartSnapshot | undefined): boolean {
+  return part?.category === "clip" && part.attributes.accessoryType === "connectorClamp";
+}
+
+function parsePartIds(value: string | undefined): string[] {
   if (!value) return [];
   try {
     const ids = JSON.parse(value) as unknown;

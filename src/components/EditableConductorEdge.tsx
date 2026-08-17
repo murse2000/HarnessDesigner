@@ -16,11 +16,13 @@ interface CableBreakoutEdgeData {
 
 export interface EditableConductorEdgeData extends Record<string, unknown> {
   entityType: "conductor";
+  locked: boolean;
   manualBendX?: number;
   gridSnap: boolean;
   gridSize: number;
   onBendCommit: (wireId: string, bendX: number) => void;
   onSelect: (wireId: string) => void;
+  onEdit: (wireId: string) => void;
   onContextMenu: (wireId: string, x: number, y: number) => void;
   cableBreakout?: CableBreakoutEdgeData;
 }
@@ -102,7 +104,7 @@ export function EditableConductorEdge({ id, source, target, sourceX, sourceY, ta
   const labelY = cablePaths.length ? (cableLabelAtSource ? sourceY : targetY) - 9 : (sourceY + targetY) / 2;
   const dragPath = `M ${bendX} ${sourceY} L ${bendX} ${targetY}`;
   const startBend = (event: ReactPointerEvent<SVGElement>) => {
-    if (event.button !== 0) return;
+    if (edgeData.locked || event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     dragging.current = true;
@@ -127,7 +129,17 @@ export function EditableConductorEdge({ id, source, target, sourceX, sourceY, ta
       style={style}
       interactionWidth={12}
     />
-    {!cablePaths.length && <path
+    <path
+      d={path}
+      className="harness-conductor-edit-zone nodrag nopan"
+      onClick={(event) => {
+        event.stopPropagation();
+        edgeData.onSelect(id);
+        if (event.detail === 2 && !edgeData.locked) edgeData.onEdit(id);
+      }}
+      onContextMenu={openContextMenu}
+    />
+    {!edgeData.locked && !cablePaths.length && <path
       d={dragPath}
       className={`harness-conductor-drag-zone nodrag nopan ${edgeData.manualBendX !== undefined ? "is-manual" : ""}`}
       style={{ pointerEvents: "stroke" }}
@@ -142,7 +154,7 @@ export function EditableConductorEdge({ id, source, target, sourceX, sourceY, ta
         setBendX(next);
       }}
     />}
-    {!cablePaths.length && selected && sourceY !== targetY && <circle
+    {!edgeData.locked && !cablePaths.length && selected && sourceY !== targetY && <circle
       className="harness-conductor-bend-grip nodrag nopan"
       cx={bendX}
       cy={(sourceY + targetY) / 2}

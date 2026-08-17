@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PartSnapshot } from "../domain/types";
-import { getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan } from "./cableRendering";
+import { getCableDisplayPolicy, getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan } from "./cableRendering";
 
 const cable: PartSnapshot = {
   id: "cable-1",
@@ -28,6 +28,12 @@ describe("다심 케이블 3D 표시 계산", () => {
   it("브레이크아웃 길이는 구간 절반을 넘지 않는다", () => {
     expect(getCableSpans(100, 80)).toEqual({ breakoutMm: 50, jacketLengthMm: 0 });
     expect(getCableSpans(100, 20)).toEqual({ breakoutMm: 20, jacketLengthMm: 60 });
+  });
+
+  it("X-Ray에서는 외피와 쉴드를 투명하게 하고 내선을 전체 길이로 표시한다", () => {
+    expect(getCableDisplayPolicy(true, true)).toEqual({ showFullLengthCores: true, jacketOpacity: 0.22, shieldOpacity: 0.16 });
+    expect(getCableDisplayPolicy(false, true)).toEqual({ showFullLengthCores: false, jacketOpacity: 1, shieldOpacity: 1 });
+    expect(getCableDisplayPolicy(false, false).showFullLengthCores).toBe(true);
   });
 
   it("실제 내선 수만큼 외피 안쪽 오프셋을 만든다", () => {

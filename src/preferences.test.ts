@@ -41,6 +41,16 @@ describe("app preferences", () => {
     expect(preferences.validationProfiles[0].rules.PIN_DUPLICATE).toBe("error");
     expect(preferences.drawingTemplates[0].fileNamePattern).toContain("{harness}");
     expect(preferences.drawingTemplates[0]).toMatchObject({ showOnCanvas: true, canvasScalePercent: 100 });
+    expect(preferences.shortcuts.addLabel).toBe("L");
+    expect(preferences.shortcuts.deleteSelection).toBe("Delete");
+    expect(preferences.shortcuts.powerTools).toBe("CmdOrCtrl+Shift+U");
+    expect(preferences.threeDViewpoints).toEqual([]);
+  });
+
+  it("사용자 3D 시점을 유지하고 잘못된 항목은 제거한다", () => {
+    const valid = { id: "view-1", name: "검사 시점", position: [10, 20, 30] as [number, number, number], target: [0, 0, 0] as [number, number, number], up: [0, 1, 0] as [number, number, number] };
+    const invalid = { ...valid, id: "view-2", name: "" };
+    expect(normalizeAppPreferences({ threeDViewpoints: [valid, invalid] }).threeDViewpoints).toEqual([valid]);
   });
 
   it("가져온 도면 템플릿 크기를 지원 범위로 제한한다", () => {

@@ -9,10 +9,17 @@ struct AppSettingsFile {
     library_backup_retention: usize,
 }
 
-fn default_library_backup_retention() -> usize { 5 }
+fn default_library_backup_retention() -> usize {
+    5
+}
 
 impl Default for AppSettingsFile {
-    fn default() -> Self { Self { library_directory: None, library_backup_retention: default_library_backup_retention() } }
+    fn default() -> Self {
+        Self {
+            library_directory: None,
+            library_backup_retention: default_library_backup_retention(),
+        }
+    }
 }
 
 pub fn library_path(app_data: &Path) -> Result<PathBuf, String> {

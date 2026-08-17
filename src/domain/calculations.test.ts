@@ -11,6 +11,24 @@ describe("하네스 제조 계산", () => {
     expect(conductorLengthMm(harness.conductors[1], harness)).toBe(890);
   });
 
+  it("사용자가 지정한 절단 길이와 피복 제거 및 메모를 컷리스트에 반영한다", () => {
+    const project = createProject();
+    const conductor = project.harnesses[0].conductors[0];
+    conductor.overrideLengthMm = 910;
+    conductor.startTermination.stripLengthMm = 6;
+    conductor.endTermination.stripLengthMm = 8;
+    conductor.notes = "양단 주석 라벨";
+    expect(conductorLengthMm(conductor, project.harnesses[0])).toBe(910);
+    expect(buildCutList(project)[0]).toMatchObject({ lengthMm: 910, startStripLengthMm: 6, endStripLengthMm: 8, notes: "양단 주석 라벨" });
+  });
+
+  it("백엔드의 미지정 null 길이는 자동 계산으로 처리한다", () => {
+    const project = createProject();
+    const conductor = project.harnesses[0].conductors[0];
+    (conductor as unknown as { overrideLengthMm: null }).overrideLengthMm = null;
+    expect(conductorLengthMm(conductor, project.harnesses[0])).toBe(830);
+  });
+
   it("전선은 m, 개별 절단 길이는 mm로 집계한다", () => {
     const project = createProject();
     const bom = buildBom(project);
@@ -136,7 +154,7 @@ describe("제조 문서 검증", () => {
     const project = createProject();
     project.harnesses[0].segments[0].lengthMm = 0;
     const rules = {
-      PART_INCOMPLETE: "error", SEGMENT_NODE_MISSING: "error", SEGMENT_LENGTH: "warning", PART_MISSING: "error",
+      PART_INCOMPLETE: "error", DUPLICATE_REFERENCE: "error", SEGMENT_NODE_MISSING: "error", SEGMENT_LENGTH: "warning", PART_MISSING: "error",
       CABLE_CORE_CAPACITY: "off", WIRE_PART_MISSING: "error", PIN_MISSING: "error", PIN_DUPLICATE: "error",
       CONNECTION_INCOMPLETE: "error", ROUTE_BROKEN: "error", CABLE_CORE_INVALID: "error", CABLE_CORE_DUPLICATE: "error",
       TERMINATION_MISSING: "error", HEAT_SHRINK_REQUIRED: "off", TERMINAL_HOUSING_INCOMPATIBLE: "error", TERMINAL_WIRE_INCOMPATIBLE: "warning",

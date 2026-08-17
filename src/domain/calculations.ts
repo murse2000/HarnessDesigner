@@ -6,6 +6,7 @@ export interface ManufacturingFormat { cutLengthRoundingMm?: number; bomWastePer
 const roundUp = (value: number, step: number) => step > 0 ? Math.ceil((value - Number.EPSILON) / step) * step : value;
 
 export function conductorLengthMm(conductor: Conductor, harness: HarnessAssembly): number {
+  if (typeof conductor.overrideLengthMm === "number") return round(Math.max(0, conductor.overrideLengthMm), 1);
   const segmentMap = new Map(harness.segments.map((segment) => [segment.id, segment]));
   const routeLength = conductor.routeSegmentIds.reduce((total, id) => total + (segmentMap.get(id)?.lengthMm ?? 0), 0);
   return round(routeLength + conductor.startTermination.allowanceMm + conductor.endTermination.allowanceMm + conductor.adjustmentMm, 1);
@@ -44,6 +45,9 @@ export function buildCutList(project: ProjectDocument, format: ManufacturingForm
       color: conductor.color,
       gauge: conductor.gauge,
       lengthMm: round(roundUp(conductorLengthMm(conductor, harness), format.cutLengthRoundingMm ?? 0), 1),
+      startStripLengthMm: conductor.startTermination.stripLengthMm,
+      endStripLengthMm: conductor.endTermination.stripLengthMm,
+      notes: conductor.notes,
     })),
   ]);
 }

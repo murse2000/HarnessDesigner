@@ -7,9 +7,9 @@ export const sampleParts: PartSnapshot[] = [
   { id: "part-housing-4", name: "DT 4핀 리셉터클", partNumber: "DT04-4P", manufacturer: "TE Connectivity", description: "4 position receptacle", revision: "A", category: "housing", unit: "ea", attributes: { cavities: "4", compatibleTerminalPartIds: "[\"part-terminal\"]", defaultTerminalPartId: "part-terminal" } },
   { id: "part-terminal", partNumber: "TERM-20", manufacturer: "Generic", description: "20 AWG female terminal", revision: "A", category: "terminal", unit: "ea", attributes: {} },
   { id: "part-seal", partNumber: "SEAL-20", manufacturer: "Generic", description: "20 AWG wire seal", revision: "A", category: "seal", unit: "ea", attributes: {} },
-  { id: "part-wire-red", partNumber: "TXL-20-RD", manufacturer: "Champlain", description: "TXL automotive wire", revision: "A", category: "wire", unit: "m", color: "RD", gauge: "20 AWG", attributes: {} },
-  { id: "part-wire-blue", partNumber: "TXL-20-BU", manufacturer: "Champlain", description: "TXL automotive wire", revision: "A", category: "wire", unit: "m", color: "BU", gauge: "20 AWG", attributes: {} },
-  { id: "part-sleeve", partNumber: "SLV-08", manufacturer: "Generic", description: "Braided sleeve 8 mm", revision: "A", category: "sleeve", unit: "m", attributes: { diameter: "8 mm" } },
+  { id: "part-wire-red", partNumber: "TXL-20-RD", manufacturer: "Champlain", description: "TXL automotive wire", revision: "A", category: "wire", unit: "m", color: "RD", gauge: "20 AWG", attributes: { outerDiameterMm: "2.2" } },
+  { id: "part-wire-blue", partNumber: "TXL-20-BU", manufacturer: "Champlain", description: "TXL automotive wire", revision: "A", category: "wire", unit: "m", color: "BU", gauge: "20 AWG", attributes: { outerDiameterMm: "2.2" } },
+  { id: "part-sleeve", partNumber: "SLV-08", manufacturer: "Generic", description: "Braided sleeve 8 mm", revision: "A", category: "sleeve", unit: "m", attributes: { diameter: "8 mm", innerDiameterMm: "8" } },
   { id: "part-label", partNumber: "LBL-25", manufacturer: "Generic", description: "25 mm heat-shrink label", revision: "A", category: "label", unit: "ea", attributes: {} },
 ];
 
@@ -27,6 +27,7 @@ export const sampleHarness: HarnessAssembly = {
   number: "HNS-001",
   name: "MAIN CONTROL HARNESS",
   revision: "A",
+  releaseStatus: "draft",
   nodes: [
     { id: "node-j1", kind: "connector", reference: "J1", label: "MAIN PCB", partId: "part-housing-8", position: { x: 100, y: 170 }, pins: pins("j1", 8) },
     { id: "node-sp1", kind: "splice", reference: "SP1", label: "SIGNAL SPLICE", position: { x: 420, y: 220 }, pins: [] },
@@ -49,7 +50,7 @@ export const sampleHarness: HarnessAssembly = {
 
 export function createProject(name = "NEW HARNESS PROJECT"): ProjectDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: crypto.randomUUID(),
     name,
     projectNumber: "PRJ-001",
@@ -61,5 +62,27 @@ export function createProject(name = "NEW HARNESS PROJECT"): ProjectDocument {
     modelAssets: [],
     parts: structuredClone(sampleParts),
     harnesses: [structuredClone(sampleHarness)],
+    releaseHistory: [],
+    testRuns: [],
+    manufacturingRules: {
+      bundlePackingFactor: 0.7,
+      maxBundleFillPercent: 80,
+      minBendRadiusMultiplier: 6,
+      maxVoltageDropPercent: 3,
+      requireUnusedCavitySeal: false,
+      currency: "KRW",
+      laborRatePerHour: 0,
+      overheadPercent: 0,
+    },
+    workInstructions: [],
+    equipmentProfiles: [
+      { id: "equipment-wire-generic", name: "범용 전선 가공기 CSV", kind: "wireProcessor", delimiter: ",", includeHeader: true, enabled: true },
+      { id: "equipment-label-generic", name: "범용 라벨 프린터 CSV", kind: "labelPrinter", delimiter: ",", includeHeader: true, enabled: true },
+      { id: "equipment-tester-generic", name: "범용 연속성 검사기 CSV", kind: "tester", delimiter: ",", includeHeader: true, enabled: true },
+    ],
+    variants: [],
+    systems: [],
+    members: [],
+    reviewComments: [],
   };
 }

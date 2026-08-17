@@ -16,6 +16,20 @@ export interface HeatShrinkRenderSpec {
   color: string;
 }
 
+export interface CableDisplayPolicy {
+  showFullLengthCores: boolean;
+  jacketOpacity: number;
+  shieldOpacity: number;
+}
+
+export function getCableDisplayPolicy(xray: boolean, jacketsVisible: boolean): CableDisplayPolicy {
+  return {
+    showFullLengthCores: xray || !jacketsVisible,
+    jacketOpacity: xray ? 0.22 : 1,
+    shieldOpacity: xray ? 0.16 : 1,
+  };
+}
+
 function positiveNumber(value: string | undefined) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;

@@ -1,14 +1,16 @@
-import { Box, Focus, MousePointer2, Waves } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Box, BoxSelect, Eye, EyeOff, Focus, ListTree, Move3D, MousePointer2, Plus, Rotate3D, Save, ScanLine, Trash2, Waves } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import type { HarnessAssembly, ModelAsset, ModelMesh, ProjectDocument } from "../domain/types";
 import { useProjectStore } from "../store/projectStore";
-import { getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan, type CoreOffset } from "../three/cableRendering";
-import { getCompactCoilLayout, layoutHarnessNodes } from "../three/harnessLayout";
+import { getCableDisplayPolicy, getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan, type CoreOffset } from "../three/cableRendering";
+import { getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "../three/harnessLayout";
 import { defaultModelPlacement, getModelPlacement, type ModelCableAxis, type ModelPlacement } from "../three/modelPlacement";
+import { buildThreeSceneItems, type ThreeSceneItem } from "../three/sceneBrowser";
 import { PanelHeader } from "./common";
-import type { AppPreferences } from "../preferences";
+import type { AppPreferences, Saved3DViewpoint } from "../preferences";
 
 const qualitySpec = {
   low: { radialSegments: 8, lengthStep: 16, pixelRatio: 1, shadows: false },
@@ -20,8 +22,27 @@ interface SceneRuntime {
   camera: THREE.PerspectiveCamera;
   content: THREE.Group;
   controls: OrbitControls;
+  grid: THREE.GridHelper;
   renderer: THREE.WebGLRenderer;
   resize: ResizeObserver;
+  scene: THREE.Scene;
+  transform: TransformControls;
+}
+
+interface ThreeVisibility {
+  housings: boolean;
+  jackets: boolean;
+  cores: boolean;
+  accessories: boolean;
+  labels: boolean;
+  grid: boolean;
+  xray: boolean;
+}
+
+interface ThreeSelection {
+  kind: "node" | "segment" | "routePoint";
+  id: string;
+  routePointIndex?: number;
 }
 
 function disposeObject(object: THREE.Object3D) {
@@ -135,6 +156,63 @@ function fitCamera(runtime: SceneRuntime) {
   runtime.controls.update();
 }
 
+function focusSceneObject(runtime: SceneRuntime, kind: ThreeSceneItem["kind"], id: string) {
+  const key = kind === "node" ? "nodeId" : kind === "segment" ? "segmentId" : "accessoryId";
+  const object = runtime.content.children.find((child) => child.userData[key] === id);
+  if (!object) return;
+  const bounds = new THREE.Box3().setFromObject(object);
+  if (bounds.isEmpty()) return;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const direction = runtime.camera.position.clone().sub(runtime.controls.target).normalize();
+  const distance = Math.max(size.x, size.y, size.z, 12) * 3;
+  runtime.controls.target.copy(center);
+  runtime.camera.position.copy(center).addScaledVector(direction.lengthSq() ? direction : new THREE.Vector3(0.65, 0.8, 0.75).normalize(), distance);
+  runtime.camera.near = Math.max(distance / 1000, 0.01);
+  runtime.camera.far = distance * 30;
+  runtime.camera.updateProjectionMatrix();
+  runtime.controls.update();
+}
+
+type StandardView = "iso" | "front" | "top" | "right";
+
+function setStandardView(runtime: SceneRuntime, view: StandardView) {
+  const bounds = new THREE.Box3().setFromObject(runtime.content);
+  if (bounds.isEmpty()) return;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const distance = Math.max(size.x, size.y, size.z, 20) * 1.7;
+  const direction = view === "front" ? new THREE.Vector3(0, 0, 1)
+    : view === "top" ? new THREE.Vector3(0, 1, 0)
+      : view === "right" ? new THREE.Vector3(1, 0, 0)
+        : new THREE.Vector3(0.65, 0.8, 0.75).normalize();
+  runtime.camera.position.copy(center).addScaledVector(direction, distance);
+  runtime.camera.up.set(0, view === "top" ? 0 : 1, view === "top" ? -1 : 0);
+  runtime.controls.target.copy(center);
+  runtime.camera.near = Math.max(distance / 1000, 0.01);
+  runtime.camera.far = distance * 20;
+  runtime.camera.updateProjectionMatrix();
+  runtime.controls.update();
+}
+
+function captureViewpoint(runtime: SceneRuntime, name: string): Saved3DViewpoint {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    position: runtime.camera.position.toArray(),
+    target: runtime.controls.target.toArray(),
+    up: runtime.camera.up.toArray(),
+  };
+}
+
+function restoreViewpoint(runtime: SceneRuntime, viewpoint: Saved3DViewpoint) {
+  runtime.camera.position.fromArray(viewpoint.position);
+  runtime.controls.target.fromArray(viewpoint.target);
+  runtime.camera.up.fromArray(viewpoint.up);
+  runtime.camera.updateProjectionMatrix();
+  runtime.controls.update();
+}
+
 function wireColor(color: string) {
   const codes: Record<string, number> = {
     BK: 0x1d242b, WH: 0xf2f3f4, RD: 0xd94141, BU: 0x2784c7, GN: 0x36a269,
@@ -159,7 +237,16 @@ function cylinderBetween(start: THREE.Vector3, end: THREE.Vector3, radius: numbe
   return cylinder;
 }
 
-function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number) {
+function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number, route: HarnessAssembly["segments"][number]["threeDRoute"]) {
+  if (route?.controlPoints.length) {
+    const points = [start, ...[...route.controlPoints]
+      .sort((left, right) => left.t - right.t)
+      .map((point) => {
+        const position = positionHarnessRoutePoint(start, end, point);
+        return new THREE.Vector3(position.x, position.y, position.z);
+      }), end];
+    return new THREE.CatmullRomCurve3(points, false, "centripetal");
+  }
   const axis = end.clone().sub(start);
   const displayLength = axis.length();
   const coil = getCompactCoilLayout(cableLengthMm, displayLength);
@@ -206,16 +293,49 @@ function tubeAlongCurve(curve: THREE.Curve<THREE.Vector3>, startMm: number, endM
   return tube;
 }
 
-function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, segment: HarnessAssembly["segments"][number], start: THREE.Vector3, end: THREE.Vector3, selected: boolean, quality: AppPreferences["threeDQuality"]) {
+function visualLayer(name: string, visible: boolean) {
+  const group = new THREE.Group();
+  group.name = name;
+  group.visible = visible;
+  return group;
+}
+
+function setObjectOpacity(object: THREE.Object3D, opacity: number) {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      material.transparent = opacity < 1;
+      material.opacity = opacity;
+      material.depthWrite = opacity >= 1;
+      material.needsUpdate = true;
+    }
+  });
+}
+
+function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, segment: HarnessAssembly["segments"][number], start: THREE.Vector3, end: THREE.Vector3, selected: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, editRoute: boolean) {
   const cablePart = project.parts.find((part) => part.id === segment.cablePartId);
   const spec = getCableRenderSpec(cablePart);
   const conductors = harness.conductors.filter((conductor) => conductor.routeSegmentIds.includes(segment.id));
   const group = new THREE.Group();
   group.userData.segmentId = segment.id;
-  const curve = segmentCurve(start, end, segment.lengthMm);
+  const jacketLayer = visualLayer("jacket", visibility.jackets);
+  const coreLayer = visualLayer("cores", visibility.cores);
+  const accessoryLayer = visualLayer("accessories", visibility.accessories);
+  group.add(jacketLayer, coreLayer, accessoryLayer);
+  const curve = segmentCurve(start, end, segment.lengthMm, segment.threeDRoute);
+  if (editRoute) {
+    for (const [index, point] of (segment.threeDRoute?.controlPoints ?? []).entries()) {
+      const position = positionHarnessRoutePoint(start, end, point);
+      const handle = new THREE.Mesh(new THREE.SphereGeometry(3.2, 16, 10), new THREE.MeshStandardMaterial({ color: 0x18a7d4, emissive: 0x06384a }));
+      handle.position.set(position.x, position.y, position.z);
+      handle.userData = { segmentId: segment.id, routePointIndex: index, routeStart: start.toArray(), routeEnd: end.toArray() };
+      group.add(handle);
+    }
+  }
   if (!spec) {
     const cable = tubeAlongCurve(curve, 0, segment.lengthMm, segment.lengthMm, 1.15, selected ? 0xf0a53b : 0x263f54, quality);
-    if (cable) group.add(cable);
+    if (cable) jacketLayer.add(cable);
     runtime.content.add(group);
     return;
   }
@@ -224,22 +344,49 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
   if (lengthMm <= 0) return;
   if (!conductors.length) {
     const jacket = tubeAlongCurve(curve, 0, lengthMm, lengthMm, spec.outerDiameterMm / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
-    if (jacket) group.add(jacket);
+    if (jacket) jacketLayer.add(jacket);
     runtime.content.add(group);
     return;
   }
 
   const { breakoutMm } = getCableSpans(lengthMm, spec.breakoutLengthMm);
+  const displayPolicy = getCableDisplayPolicy(visibility.xray, visibility.jackets);
   const jacket = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
-  if (jacket) group.add(jacket);
+  if (jacket) {
+    setObjectOpacity(jacket, displayPolicy.jacketOpacity);
+    jacketLayer.add(jacket);
+  }
 
-  const offsets = getCoreOffsets(conductors.length, spec.outerDiameterMm, spec.coreDiameterMm);
+  const offsets = getCoreOffsets(conductors.length, spec.outerDiameterMm, spec.coreDiameterMm).map((offset) => ({ x: offset.x * coreSeparation, y: offset.y * coreSeparation }));
   conductors.forEach((conductor, index) => {
+    if (displayPolicy.showFullLengthCores) {
+      const exposedCore = tubeAlongCurve(curve, 0, lengthMm, lengthMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality, offsets[index]);
+      if (exposedCore) coreLayer.add(exposedCore);
+      return;
+    }
     const coreStart = tubeAlongCurve(curve, 0, breakoutMm, lengthMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality, offsets[index], 0, 1);
     const coreEnd = tubeAlongCurve(curve, lengthMm - breakoutMm, lengthMm, lengthMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality, offsets[index], 1, 0);
-    if (coreStart) group.add(coreStart);
-    if (coreEnd) group.add(coreEnd);
+    if (coreStart) coreLayer.add(coreStart);
+    if (coreEnd) coreLayer.add(coreEnd);
   });
+
+  if (spec.construction === "shieldedMultiCore") {
+    const shield = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm * 0.43, 0xaeb8c2, quality);
+    if (shield) {
+      setObjectOpacity(shield, displayPolicy.shieldOpacity);
+      accessoryLayer.add(shield);
+    }
+  }
+
+  const coveringRadius = spec.outerDiameterMm / 2 + 0.45;
+  if (segment.sleevePartId) {
+    const sleeve = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, coveringRadius, 0x596a75, quality);
+    if (sleeve) accessoryLayer.add(sleeve);
+  }
+  if (segment.tapePartId) {
+    const tape = tubeAlongCurve(curve, lengthMm * 0.42, lengthMm * 0.58, lengthMm, coveringRadius + 0.25, 0x161b20, quality);
+    if (tape) accessoryLayer.add(tape);
+  }
 
   const heatShrinks = [
     { partId: segment.startHeatShrinkPartId, centerMm: breakoutMm },
@@ -251,16 +398,18 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
     if (!heatShrinkSpec) continue;
     const span = getHeatShrinkSpan(lengthMm, heatShrink.centerMm, heatShrinkSpec.lengthMm);
     const tube = tubeAlongCurve(curve, span.startMm, span.endMm, lengthMm, heatShrinkSpec.finishedDiameterMm / 2, wireColor(heatShrinkSpec.color), quality);
-    if (tube) group.add(tube);
+    if (tube) accessoryLayer.add(tube);
   }
   runtime.content.add(group);
 }
 
-function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nodeId: string) => void) {
+function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (selection: ThreeSelection) => void, onRoutePointCommit?: (segmentId: string, index: number, point: { t: number; offsetX: number; offsetY: number }) => void) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<SceneRuntime | null>(null);
   const selectRef = useRef(onSelect);
+  const routeCommitRef = useRef(onRoutePointCommit);
   selectRef.current = onSelect;
+  routeCommitRef.current = onRoutePointCommit;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -286,6 +435,25 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nod
     grid.material.opacity = 0.45;
     grid.material.transparent = true;
     scene.add(grid);
+    const transform = new TransformControls(camera, renderer.domElement);
+    transform.setMode("translate");
+    transform.setSize(0.7);
+    scene.add(transform.getHelper());
+    const handleTransformDrag = (event: { value: unknown }) => { controls.enabled = !Boolean(event.value); };
+    const handleTransformCommit = () => {
+      const target = transform.object;
+      if (!target || target.userData.routePointIndex === undefined) return;
+      const [startX, startY, startZ] = target.userData.routeStart as [number, number, number];
+      const [endX, endY, endZ] = target.userData.routeEnd as [number, number, number];
+      const point = projectHarnessRoutePoint(
+        { x: startX, y: startY, z: startZ },
+        { x: endX, y: endY, z: endZ },
+        { x: target.position.x, y: target.position.y, z: target.position.z },
+      );
+      routeCommitRef.current?.(target.userData.segmentId as string, target.userData.routePointIndex as number, point);
+    };
+    transform.addEventListener("dragging-changed", handleTransformDrag);
+    transform.addEventListener("mouseUp", handleTransformCommit);
     const resize = new ResizeObserver(() => {
       const width = Math.max(host.clientWidth, 1);
       const height = Math.max(host.clientHeight, 1);
@@ -294,7 +462,7 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nod
       camera.updateProjectionMatrix();
     });
     resize.observe(host);
-    const runtime = { camera, content, controls, renderer, resize };
+    const runtime = { camera, content, controls, grid, renderer, resize, scene, transform };
     runtimeRef.current = runtime;
     let pointer = { x: 0, y: 0 };
     const pointerDown = (event: PointerEvent) => { pointer = { x: event.clientX, y: event.clientY }; };
@@ -306,8 +474,17 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nod
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(content.children, true);
       let target: THREE.Object3D | null = hits[0]?.object ?? null;
-      while (target && !target.userData.nodeId) target = target.parent;
-      if (target?.userData.nodeId) selectRef.current(target.userData.nodeId);
+      while (target && !target.userData.nodeId && !target.userData.segmentId) target = target.parent;
+      if (target?.userData.routePointIndex !== undefined) {
+        transform.attach(target);
+        selectRef.current?.({ kind: "routePoint", id: target.userData.segmentId as string, routePointIndex: target.userData.routePointIndex as number });
+      } else if (target?.userData.nodeId) {
+        transform.detach();
+        selectRef.current?.({ kind: "node", id: target.userData.nodeId as string });
+      } else if (target?.userData.segmentId) {
+        transform.detach();
+        selectRef.current?.({ kind: "segment", id: target.userData.segmentId as string });
+      } else transform.detach();
     };
     renderer.domElement.addEventListener("pointerdown", pointerDown);
     renderer.domElement.addEventListener("pointerup", pointerUp);
@@ -317,6 +494,9 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nod
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
       resize.disconnect();
+      transform.removeEventListener("dragging-changed", handleTransformDrag);
+      transform.removeEventListener("mouseUp", handleTransformCommit);
+      transform.dispose();
       controls.dispose();
       disposeObject(scene);
       renderer.dispose();
@@ -327,16 +507,53 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (nod
   return { hostRef, runtimeRef };
 }
 
-function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, selectedEntityId: string | null, compactLayout: boolean, quality: AppPreferences["threeDQuality"]) {
+function addAccessoryVisuals(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, positions: Map<string, THREE.Vector3>, visibility: ThreeVisibility) {
+  if (!visibility.accessories) return;
+  const fallback = positions.values().next().value as THREE.Vector3 | undefined;
+  harness.accessories.forEach((accessory, index) => {
+    const part = project.parts.find((item) => item.id === accessory.partId);
+    if (!part) return;
+    const nodePosition = accessory.nodeId ? positions.get(accessory.nodeId) : undefined;
+    const segment = harness.segments.find((item) => item.id === accessory.segmentId);
+    const start = segment ? positions.get(segment.fromNodeId) : undefined;
+    const end = segment ? positions.get(segment.toNodeId) : undefined;
+    const position = nodePosition?.clone().add(new THREE.Vector3(0, 0, 16)) ?? (start && end ? start.clone().lerp(end, 0.5) : fallback?.clone().add(new THREE.Vector3(index * 14, 12, 18)));
+    if (!position) return;
+    const group = new THREE.Group();
+    group.userData.accessoryId = accessory.id;
+    if (accessory.nodeId) group.userData.nodeId = accessory.nodeId;
+    else if (segment) group.userData.segmentId = segment.id;
+    else if (harness.nodes[0]) group.userData.nodeId = harness.nodes[0].id;
+    group.position.copy(position);
+    let visual: THREE.Mesh;
+    if (part.category === "clip") visual = new THREE.Mesh(new THREE.TorusGeometry(6, 1.4, 8, 20), new THREE.MeshStandardMaterial({ color: 0x4aa873, metalness: 0.2, roughness: 0.55 }));
+    else if (part.category === "label") visual = new THREE.Mesh(new THREE.BoxGeometry(18, 1.2, 8), new THREE.MeshStandardMaterial({ color: 0xf0c84a, roughness: 0.7 }));
+    else if (part.category === "lug" || part.category === "terminal" || part.category === "seal") visual = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 8, 12), new THREE.MeshStandardMaterial({ color: part.category === "seal" ? 0xd9863c : 0xb9c1c7, metalness: 0.35, roughness: 0.45 }));
+    else visual = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 8), new THREE.MeshStandardMaterial({ color: 0x8e6cc0, roughness: 0.65 }));
+    visual.castShadow = true;
+    group.add(visual);
+    if (visibility.labels) {
+      const label = labelSprite(`${part.category.toUpperCase()} · ${part.partNumber}`);
+      label.position.set(0, 8, 0);
+      group.add(label);
+    }
+    runtime.content.add(group);
+  });
+}
+
+function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, selectedEntityId: string | null, compactLayout: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, editRoute: boolean) {
+  runtime.transform.detach();
   disposeObject(runtime.content);
   runtime.content.clear();
+  runtime.grid.visible = visibility.grid;
   const positions = new Map(Array.from(layoutHarnessNodes(harness, compactLayout ? 180 : undefined), ([id, position]) => [id, new THREE.Vector3(position.x, position.y, position.z)]));
   for (const segment of harness.segments) {
     const start = positions.get(segment.fromNodeId);
     const end = positions.get(segment.toNodeId);
     if (!start || !end) continue;
-    addSegmentVisual(runtime, project, harness, segment, start, end, selectedEntityId === segment.id, quality);
+    addSegmentVisual(runtime, project, harness, segment, start, end, selectedEntityId === segment.id, quality, visibility, coreSeparation, editRoute && selectedEntityId === segment.id);
   }
+  addAccessoryVisuals(runtime, project, harness, positions, visibility);
   for (const node of harness.nodes) {
     const group = new THREE.Group();
     group.userData.nodeId = node.id;
@@ -360,22 +577,142 @@ function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: 
     }
     const label = labelSprite(`${node.reference} · ${part?.partNumber ?? node.label}`);
     label.position.set(0, 11, 0);
+    label.visible = visibility.labels;
     group.add(label);
+    group.visible = visibility.housings;
     runtime.content.add(group);
   }
-  fitCamera(runtime);
 }
 
 export function Harness3DView() {
-  const { snapshot, activeHarnessId, selectedEntityId, selectEntity, preferences } = useProjectStore();
+  const { snapshot, activeHarnessId, selectedEntityId, selectedEntityType, selectEntity, updateProject, preferences, setPreferences } = useProjectStore();
   const [compactLayout, setCompactLayout] = useState(true);
-  const { hostRef, runtimeRef } = useThreeScene(preferences.threeDQuality, (nodeId) => selectEntity(nodeId, "node"));
+  const [visibility, setVisibility] = useState<ThreeVisibility>({ housings: true, jackets: true, cores: true, accessories: true, labels: true, grid: true, xray: false });
+  const [coreSeparation, setCoreSeparation] = useState(1);
+  const [sceneBrowserOpen, setSceneBrowserOpen] = useState(true);
+  const [editRoute, setEditRoute] = useState(false);
+  const [selectedRoutePoint, setSelectedRoutePoint] = useState<number | null>(null);
+  const [activeViewpointId, setActiveViewpointId] = useState("");
+  const layoutKeyRef = useRef("");
+  const { hostRef, runtimeRef } = useThreeScene(preferences.threeDQuality, (selection) => {
+    if (selection.kind === "node") selectEntity(selection.id, "node");
+    else {
+      selectEntity(selection.id, "segment");
+      setSelectedRoutePoint(selection.kind === "routePoint" ? selection.routePointIndex ?? null : null);
+    }
+  }, (segmentId, index, point) => {
+    void updateProject((project) => {
+      const segment = project.harnesses.find((item) => item.id === activeHarnessId)?.segments.find((item) => item.id === segmentId);
+      if (segment?.threeDRoute?.controlPoints[index]) segment.threeDRoute.controlPoints[index] = point;
+    });
+  });
   const harness = snapshot?.project.harnesses.find((item) => item.id === activeHarnessId);
+  const sceneItems = useMemo(() => snapshot && harness ? buildThreeSceneItems(snapshot.project, harness) : [], [harness, snapshot]);
   useEffect(() => {
-    if (runtimeRef.current && snapshot && harness) buildHarness(runtimeRef.current, snapshot.project, harness, selectedEntityId, compactLayout, preferences.threeDQuality);
-  }, [snapshot?.revision, harness?.id, selectedEntityId, compactLayout, preferences.threeDQuality]);
+    if (!runtimeRef.current || !snapshot || !harness) return;
+    buildHarness(runtimeRef.current, snapshot.project, harness, selectedEntityId, compactLayout, preferences.threeDQuality, visibility, coreSeparation, editRoute);
+    const layoutKey = `${harness.id}:${compactLayout}`;
+    if (layoutKeyRef.current !== layoutKey) {
+      fitCamera(runtimeRef.current);
+      layoutKeyRef.current = layoutKey;
+    }
+  }, [snapshot?.revision, harness?.id, selectedEntityId, compactLayout, preferences.threeDQuality, visibility, coreSeparation, editRoute]);
   if (!snapshot || !harness) return <div className="canvas-empty"><Box size={36} /><span>3D로 표시할 하네스를 선택하세요.</span></div>;
-  return <div className="harness-3d-view"><PanelHeader title={`3D HARNESS · ${harness.number}`} icon={<Box size={14} />} /><div className="three-toolbar"><span><MousePointer2 size={12} />부품 선택</span><span>좌클릭 회전 · 우클릭 이동 · 휠 확대</span><button className={compactLayout ? "active" : ""} onClick={() => setCompactLayout((current) => !current)}><Waves size={12} />{compactLayout ? "컴팩트 배치" : "실제 길이"}</button><button onClick={() => runtimeRef.current && fitCamera(runtimeRef.current)}><Focus size={12} />전체 보기</button></div><div className="three-viewport" ref={hostRef} /></div>;
+  const selectedSegment = selectedEntityType === "segment" ? harness.segments.find((item) => item.id === selectedEntityId) : undefined;
+  const selectSceneItem = (item: ThreeSceneItem) => {
+    if (item.kind === "node" || item.kind === "segment") selectEntity(item.id, item.kind);
+    if (runtimeRef.current) focusSceneObject(runtimeRef.current, item.kind, item.id);
+  };
+  const toggleVisibility = (key: keyof ThreeVisibility) => setVisibility((current) => ({ ...current, [key]: !current[key] }));
+  const addRoutePoint = () => {
+    if (!selectedSegment) return;
+    const count = selectedSegment.threeDRoute?.controlPoints.length ?? 0;
+    void updateProject((project) => {
+      const segment = project.harnesses.find((item) => item.id === harness.id)?.segments.find((item) => item.id === selectedSegment.id);
+      if (!segment) return;
+      segment.threeDRoute = { controlPoints: [...(segment.threeDRoute?.controlPoints ?? []), { t: (count + 1) / (count + 2), offsetX: 0, offsetY: 20 }] };
+    });
+    setEditRoute(true);
+    setSelectedRoutePoint(count);
+  };
+  const deleteRoutePoint = () => {
+    if (!selectedSegment || selectedRoutePoint === null) return;
+    void updateProject((project) => {
+      const segment = project.harnesses.find((item) => item.id === harness.id)?.segments.find((item) => item.id === selectedSegment.id);
+      if (!segment?.threeDRoute) return;
+      segment.threeDRoute.controlPoints.splice(selectedRoutePoint, 1);
+      if (!segment.threeDRoute.controlPoints.length) delete segment.threeDRoute;
+    });
+    setSelectedRoutePoint(null);
+  };
+  const resetRoute = () => {
+    if (!selectedSegment) return;
+    void updateProject((project) => {
+      const segment = project.harnesses.find((item) => item.id === harness.id)?.segments.find((item) => item.id === selectedSegment.id);
+      if (segment) delete segment.threeDRoute;
+    });
+    setSelectedRoutePoint(null);
+  };
+  const saveViewpoint = () => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    const name = window.prompt("저장할 시점 이름을 입력하세요.", `시점 ${preferences.threeDViewpoints.length + 1}`)?.trim();
+    if (!name) return;
+    const viewpoint = captureViewpoint(runtime, name);
+    setPreferences({ ...preferences, threeDViewpoints: [...preferences.threeDViewpoints, viewpoint] });
+    setActiveViewpointId(viewpoint.id);
+  };
+  const deleteViewpoint = () => {
+    if (!activeViewpointId) return;
+    setPreferences({ ...preferences, threeDViewpoints: preferences.threeDViewpoints.filter((item) => item.id !== activeViewpointId) });
+    setActiveViewpointId("");
+  };
+  return <div className="harness-3d-view">
+    <PanelHeader title={`3D HARNESS · ${harness.number}`} icon={<Box size={14} />} />
+    <div className="three-toolbar three-toolbar--primary">
+      <span><MousePointer2 size={12} />선택 · 좌클릭 회전 · 우클릭 이동</span>
+      <button className={compactLayout ? "active" : ""} onClick={() => setCompactLayout((current) => !current)}><Waves size={12} />{compactLayout ? "컴팩트" : "실제 길이"}</button>
+      <button className={sceneBrowserOpen ? "active" : ""} onClick={() => setSceneBrowserOpen((current) => !current)}><ListTree size={12} />구성</button>
+      <button onClick={() => runtimeRef.current && fitCamera(runtimeRef.current)}><Focus size={12} />전체</button>
+      <button title="등각" onClick={() => runtimeRef.current && setStandardView(runtimeRef.current, "iso")}><BoxSelect size={12} />ISO</button>
+      <button onClick={() => runtimeRef.current && setStandardView(runtimeRef.current, "front")}>정면</button>
+      <button onClick={() => runtimeRef.current && setStandardView(runtimeRef.current, "top")}>평면</button>
+      <button onClick={() => runtimeRef.current && setStandardView(runtimeRef.current, "right")}>우측</button>
+      <select aria-label="저장된 3D 시점" value={activeViewpointId} onChange={(event) => {
+        setActiveViewpointId(event.target.value);
+        const viewpoint = preferences.threeDViewpoints.find((item) => item.id === event.target.value);
+        if (runtimeRef.current && viewpoint) restoreViewpoint(runtimeRef.current, viewpoint);
+      }}><option value="">사용자 시점</option>{preferences.threeDViewpoints.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+      <button title="현재 시점 저장" onClick={saveViewpoint}><Save size={12} /></button>
+      <button title="선택 시점 삭제" disabled={!activeViewpointId} onClick={deleteViewpoint}><Trash2 size={12} /></button>
+    </div>
+    <div className="three-toolbar three-toolbar--display">
+      {(["housings", "jackets", "cores", "accessories", "labels", "grid"] as const).map((key) => <button key={key} className={visibility[key] ? "active" : ""} onClick={() => toggleVisibility(key)}>{visibility[key] ? <Eye size={11} /> : <EyeOff size={11} />}{key === "housings" ? "하우징" : key === "jackets" ? "외피" : key === "cores" ? "코어" : key === "accessories" ? "부자재" : key === "labels" ? "표기" : "그리드"}</button>)}
+      <button className={visibility.xray ? "active" : ""} onClick={() => toggleVisibility("xray")}><ScanLine size={11} />X-RAY</button>
+      <label>코어 분리 <input aria-label="코어 분리" type="range" min="1" max="4" step="0.5" value={coreSeparation} onChange={(event) => setCoreSeparation(Number(event.target.value))} /><b>{coreSeparation.toFixed(1)}×</b></label>
+      <span className="three-legend"><i className="housing" />하우징<i className="jacket" />외피<i className="core" />코어<i className="accessory" />부자재</span>
+    </div>
+    <div className="three-toolbar three-toolbar--shape">
+      <span><Move3D size={12} />형상 편집</span>
+      <strong>{selectedSegment ? selectedSegment.label : "케이블을 선택하세요"}</strong>
+      <button className={editRoute ? "active" : ""} disabled={!selectedSegment} onClick={() => setEditRoute((current) => !current)}><Rotate3D size={12} />제어점</button>
+      <button disabled={!selectedSegment} onClick={addRoutePoint}><Plus size={12} />추가</button>
+      <button disabled={selectedRoutePoint === null} onClick={deleteRoutePoint}><Trash2 size={12} />삭제</button>
+      <button disabled={!selectedSegment?.threeDRoute} onClick={resetRoute}>자동 형상</button>
+      {editRoute && selectedSegment && <em>청록색 제어점을 선택한 뒤 축 핸들을 드래그하세요.</em>}
+    </div>
+    <div className="three-viewport" ref={hostRef}>
+      {sceneBrowserOpen && <aside className="three-scene-browser">
+        <header><ListTree size={13} /><strong>SCENE</strong><span>{sceneItems.length}</span></header>
+        {(["node", "segment", "accessory"] as const).map((kind) => <section key={kind}>
+          <h3>{kind === "node" ? "HOUSINGS" : kind === "segment" ? "CABLES" : "ACCESSORIES"}</h3>
+          {sceneItems.filter((item) => item.kind === kind).map((item) => <button key={item.id} className={selectedEntityId === item.id ? "active" : ""} onClick={() => selectSceneItem(item)} title="선택 및 화면 맞춤">
+            <span><strong>{item.reference}</strong><small>{item.detail}</small></span><Focus size={11} />
+          </button>)}
+        </section>)}
+      </aside>}
+    </div>
+  </div>;
 }
 
 export function Part3DPreview({ asset, placement, showCable = false }: { asset: ModelAsset | null; placement?: ModelPlacement; showCable?: boolean }) {

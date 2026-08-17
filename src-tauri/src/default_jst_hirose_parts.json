@@ -1,0 +1,320 @@
+[
+  {
+    "id": "builtin-jst-sph-002t-p05s",
+    "name": "PH 암 크림프 터미널",
+    "partNumber": "SPH-002T-P0.5S",
+    "manufacturer": "JST",
+    "description": "PH series female crimp contact for 24-30 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "24-30 AWG",
+    "attributes": {
+      "wireRange": "24-30 AWG",
+      "insulationDiameter": "0.8-1.5 mm",
+      "series": "PH",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=199",
+      "drawingUrl": "https://www.jst-mfg.com/product/pdf/eng/ePH.pdf"
+    }
+  },
+  {
+    "id": "builtin-jst-phr-4",
+    "name": "PH 4핀 리셉터클 하우징",
+    "partNumber": "PHR-4",
+    "manufacturer": "JST",
+    "description": "2.00 mm pitch, single-row 4 circuit receptacle housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "2.00 mm",
+      "rows": "1",
+      "series": "PH",
+      "compatibleTerminalPartIds": "[\"builtin-jst-sph-002t-p05s\"]",
+      "defaultTerminalPartId": "builtin-jst-sph-002t-p05s",
+      "officialImageUrl": "https://www.jst-mfg.com/product/images/pict/PH.jpg",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=199",
+      "drawingUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=199&doc=4&filename=PHR-4.pdf",
+      "cadReferenceUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=199&doc=2&filename=PHR-4.zip"
+    }
+  },
+  {
+    "id": "builtin-jst-sxh-001t-p06",
+    "name": "XH 암 크림프 터미널",
+    "partNumber": "SXH-001T-P0.6",
+    "manufacturer": "JST",
+    "description": "XH series female crimp contact for 22-28 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "22-28 AWG",
+    "attributes": {
+      "wireRange": "22-28 AWG",
+      "insulationDiameter": "0.9-1.9 mm",
+      "series": "XH",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=277",
+      "drawingUrl": "https://www.jst-mfg.com/product/pdf/eng/eXH-H.pdf"
+    }
+  },
+  {
+    "id": "builtin-jst-xhp-4",
+    "name": "XH 4핀 리셉터클 하우징",
+    "partNumber": "XHP-4",
+    "manufacturer": "JST",
+    "description": "2.50 mm pitch, single-row 4 circuit receptacle housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "2.50 mm",
+      "rows": "1",
+      "series": "XH",
+      "compatibleTerminalPartIds": "[\"builtin-jst-sxh-001t-p06\"]",
+      "defaultTerminalPartId": "builtin-jst-sxh-001t-p06",
+      "officialImageUrl": "https://www.jst-mfg.com/product/images/pict/XH.jpg",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=277",
+      "drawingUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=277&doc=4&filename=XHP-4.pdf",
+      "cadReferenceUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=277&doc=2&filename=XHP-4.zip"
+    }
+  },
+  {
+    "id": "builtin-jst-sshl-002t-p02",
+    "name": "GH 암 크림프 터미널",
+    "partNumber": "SSHL-002T-P0.2",
+    "manufacturer": "JST",
+    "description": "GH series female crimp contact for 26-30 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "26-30 AWG",
+    "attributes": {
+      "wireRange": "26-30 AWG",
+      "insulationDiameter": "0.76-1.0 mm",
+      "series": "GH",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=105",
+      "drawingUrl": "https://www.jst-mfg.com/product/pdf/eng/eGH.pdf"
+    }
+  },
+  {
+    "id": "builtin-jst-ghr-04v-s",
+    "name": "GH 4핀 리셉터클 하우징",
+    "partNumber": "GHR-04V-S",
+    "manufacturer": "JST",
+    "description": "1.25 mm pitch, single-row 4 circuit locking receptacle housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "1.25 mm",
+      "rows": "1",
+      "series": "GH",
+      "compatibleTerminalPartIds": "[\"builtin-jst-sshl-002t-p02\"]",
+      "defaultTerminalPartId": "builtin-jst-sshl-002t-p02",
+      "officialImageUrl": "https://www.jst-mfg.com/product/images/pict/GH.jpg",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=105",
+      "drawingUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=105&doc=4&filename=GHR-04V-S.pdf",
+      "cadReferenceUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=105&doc=2&filename=GHR-04V-S.zip"
+    }
+  },
+  {
+    "id": "builtin-jst-swpr-001t-p025",
+    "name": "JWPF 암 크림프 터미널",
+    "partNumber": "SWPR-001T-P025",
+    "manufacturer": "JST",
+    "description": "JWPF waterproof receptacle contact for 22-26 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "22-26 AWG",
+    "attributes": {
+      "wireRange": "22-26 AWG",
+      "insulationDiameter": "1.4-1.7 mm",
+      "series": "JWPF",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=152",
+      "drawingUrl": "https://www.jst-mfg.com/product/pdf/eng/eJWPF-WW.pdf"
+    }
+  },
+  {
+    "id": "builtin-jst-04r-jwpf-vsle-s",
+    "name": "JWPF 4핀 방수 리셉터클 하우징",
+    "partNumber": "04R-JWPF-VSLE-S",
+    "manufacturer": "JST",
+    "description": "2.00 mm pitch, 4 circuit waterproof receptacle housing assembly",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "2.00 mm",
+      "rows": "1",
+      "series": "JWPF",
+      "sealed": "true",
+      "compatibleTerminalPartIds": "[\"builtin-jst-swpr-001t-p025\"]",
+      "defaultTerminalPartId": "builtin-jst-swpr-001t-p025",
+      "officialImageUrl": "https://www.jst-mfg.com/product/images/pict/JWPF-WW.jpg",
+      "sourceUrl": "https://www.jst-mfg.com/product/index.php?lang=2&series=152",
+      "drawingUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=152&doc=4&filename=04R-JWPF-VSLE-S.pdf",
+      "cadReferenceUrl": "https://www.jst-mfg.com/product/index.php?type=10&series=152&doc=2&filename=04R-JWPF-VSLE-S.zip"
+    }
+  },
+  {
+    "id": "builtin-hirose-df13-2630scf",
+    "name": "DF13 암 크림프 터미널",
+    "partNumber": "DF13-2630SCF",
+    "manufacturer": "Hirose",
+    "description": "DF13 series female crimp contact for 26-30 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "26-30 AWG",
+    "attributes": {
+      "wireRange": "26-30 AWG",
+      "series": "DF13",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0536-0300-5-00"
+    }
+  },
+  {
+    "id": "builtin-hirose-df13-4s-125c",
+    "name": "DF13 4핀 리셉터클 하우징",
+    "partNumber": "DF13-4S-1.25C",
+    "manufacturer": "Hirose",
+    "description": "1.25 mm pitch, single-row 4 circuit crimp socket housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "modelAssetId": "builtin-model-hirose-df13-4s-125c",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "1.25 mm",
+      "rows": "1",
+      "series": "DF13",
+      "compatibleTerminalPartIds": "[\"builtin-hirose-df13-2630scf\"]",
+      "defaultTerminalPartId": "builtin-hirose-df13-2630scf",
+      "officialImageUrl": "https://www.hirose.com/medias/Industrial_DF13.jpg?context=bWFzdGVyfHByaXZhdGVfc3lzX3VwbG9hZHw0NjIzOHxpbWFnZS9qcGVnfGMzbHpMVzFoYzNSbGNpOXdjbWwyWVhSbFgzTjVjMTkxY0d4dllXUXZhRE5qTDJnelpDODVNREV3T1RVMk16TTNNVGd5TDBsdVpIVnpkSEpwWVd4ZlJFWXhNeTVxY0djfGYxNmRkMjI1ZWMwNzk1MjNiMjA5NGU0MmQ0MzQ5NmQxMmU4ODVhN2IxOWNmNGRlYWMwN2U5OGU5ZDI2ZjEyZTQ",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0536-0003-0-00",
+      "drawingUrl": "https://www.hirose.com/en/product/document?clcode=CL0536-0003-0-00&productname=DF13-4S-1.25C&series=DF13&documenttype=2DDrawing&lang=en&documentid=0000986164",
+      "cadReferenceUrl": "https://www.hirose.com/en/product/document?clcode=CL0536-0003-0-00&productname=DF13-4S-1.25C&series=DF13&documenttype=3DDrawing_STEP&lang=en&documentid=0001217315S"
+    }
+  },
+  {
+    "id": "builtin-hirose-df62-2428scf",
+    "name": "DF62 암 크림프 터미널",
+    "partNumber": "DF62-2428SCF",
+    "manufacturer": "Hirose",
+    "description": "DF62 series female crimp contact for 24-28 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "24-28 AWG",
+    "attributes": {
+      "wireRange": "24-28 AWG",
+      "series": "DF62",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0544-0521-9-00"
+    }
+  },
+  {
+    "id": "builtin-hirose-df62c-4s-22c",
+    "name": "DF62C 4핀 리셉터클 하우징",
+    "partNumber": "DF62C-4S-2.2C",
+    "manufacturer": "Hirose",
+    "description": "2.20 mm pitch, 4 circuit in-line crimp socket housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "modelAssetId": "builtin-model-hirose-df62c-4s-22c",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "2.20 mm",
+      "series": "DF62",
+      "compatibleTerminalPartIds": "[\"builtin-hirose-df62-2428scf\"]",
+      "defaultTerminalPartId": "builtin-hirose-df62-2428scf",
+      "officialImageUrl": "https://www.hirose.com/medias/Industrial_DF62.jpg?context=bWFzdGVyfHByaXZhdGVfc3lzX3VwbG9hZHw1MTkyNXxpbWFnZS9qcGVnfGMzbHpMVzFoYzNSbGNpOXdjbWwyWVhSbFgzTjVjMTkxY0d4dllXUXZhR1V4TDJnME1pODVNVGN4T0RNeU1qUXlNakEyTDBsdVpIVnpkSEpwWVd4ZlJFWTJNaTVxY0djfDcxNDc4ZmU1MjUwM2ZkMDY2OGI0MmMzZjdjYjEwOGIyNTZiODRlN2FkZDFiOWFkZDNmNmI4ZTYzOWNmOGYzODQ",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0544-0567-0-00",
+      "drawingUrl": "https://www.hirose.com/en/product/document?clcode=CL0544-0567-0-00&productname=DF62C-4S-2.2C&series=DF62&documenttype=2DDrawing&lang=en&documentid=0000954833",
+      "cadReferenceUrl": "https://www.hirose.com/en/product/document?clcode=CL0544-0567-0-00&productname=DF62C-4S-2.2C&series=DF62&documenttype=3DDrawing_STEP&lang=en&documentid=0001218713S"
+    }
+  },
+  {
+    "id": "builtin-hirose-df11-2428scf",
+    "name": "DF11 암 크림프 터미널",
+    "partNumber": "DF11-2428SCF",
+    "manufacturer": "Hirose",
+    "description": "DF11 series female crimp contact for 24-28 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "24-28 AWG",
+    "attributes": {
+      "wireRange": "24-28 AWG",
+      "insulationDiameter": "0.9-1.45 mm",
+      "series": "DF11",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0543-0500-2-00"
+    }
+  },
+  {
+    "id": "builtin-hirose-df11-6ds-2c",
+    "name": "DF11 6핀 리셉터클 하우징",
+    "partNumber": "DF11-6DS-2C",
+    "manufacturer": "Hirose",
+    "description": "2.00 mm pitch, dual-row 6 circuit crimp socket housing",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "modelAssetId": "builtin-model-hirose-df11-6ds-2c",
+    "attributes": {
+      "cavities": "6",
+      "pitch": "2.00 mm",
+      "rows": "2",
+      "series": "DF11",
+      "compatibleTerminalPartIds": "[\"builtin-hirose-df11-2428scf\"]",
+      "defaultTerminalPartId": "builtin-hirose-df11-2428scf",
+      "officialImageUrl": "https://www.hirose.com/medias/pic_DF11.jpg?context=bWFzdGVyfHByaXZhdGVfc3lzX3VwbG9hZHwxMjI4Njh8aW1hZ2UvanBlZ3xjM2x6TFcxaGMzUmxjaTl3Y21sMllYUmxYM041YzE5MWNHeHZZV1F2YURRekwyZzVPQzg0T1RZM05UY3pOalkzT0Rjd0wzQnBZMTlFUmpFeExtcHdad3w1YzE5OWMyZjExNmQ2YzQ2M2ViMTNiNjNhZjhjZTU2OGEwYjhkOTQwNDRhMzRjOTI5M2ExNDMyZjZmYzg4YjUx",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0543-0502-8-00",
+      "drawingUrl": "https://www.hirose.com/en/product/document?clcode=CL0543-0502-8-00&productname=DF11-6DS-2C&series=DF11&documenttype=2DDrawing&lang=en&documentid=0000995267",
+      "cadReferenceUrl": "https://www.hirose.com/en/product/document?clcode=CL0543-0502-8-00&productname=DF11-6DS-2C&series=DF11&documenttype=3DDrawing_STEP&lang=en&documentid=0001217011S"
+    }
+  },
+  {
+    "id": "builtin-hirose-gt8-2428scf-70",
+    "name": "GT17 중심 크림프 터미널",
+    "partNumber": "GT8-2428SCF(70)",
+    "manufacturer": "Hirose",
+    "description": "GT17H/HN series center terminal for 24-28 AWG wire",
+    "revision": "CATALOG",
+    "category": "terminal",
+    "unit": "ea",
+    "gauge": "24-28 AWG",
+    "attributes": {
+      "wireRange": "24-28 AWG",
+      "insulationDiameter": "0.8-1.5 mm",
+      "series": "GT17H/HN",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0758-0001-8-70"
+    }
+  },
+  {
+    "id": "builtin-hirose-gt17h-4s-2c",
+    "name": "GT17H 4핀 인슐레이터 하우징",
+    "partNumber": "GT17H-4S-2C",
+    "manufacturer": "Hirose",
+    "description": "2.00 mm pitch, 4 circuit high-speed automotive connector insulator",
+    "revision": "CATALOG",
+    "category": "housing",
+    "unit": "ea",
+    "modelAssetId": "builtin-model-hirose-gt17h-4s-2c",
+    "attributes": {
+      "cavities": "4",
+      "pitch": "2.00 mm",
+      "rows": "1",
+      "series": "GT17H/HN",
+      "compatibleTerminalPartIds": "[\"builtin-hirose-gt8-2428scf-70\"]",
+      "defaultTerminalPartId": "builtin-hirose-gt8-2428scf-70",
+      "officialImageUrl": "https://www.hirose.com/medias/GT17H%2CHN.jpg?context=bWFzdGVyfHByaXZhdGVfc3lzX3VwbG9hZHw3MDk0MHxpbWFnZS9qcGVnfGMzbHpMVzFoYzNSbGNpOXdjbWwyWVhSbFgzTjVjMTkxY0d4dllXUXZhRGRoTDJobU1DODRPRGsxTmpReE9ERXpNREl5TDBkVU1UZElMRWhPTG1wd1p3fDhiZmMxN2M5OWI2ZDczMzBkOTYzOWNiMzhiMGUwNDQwNGVhMThhOWJmZDdiNGVmNWE3MDUxZTRkOGZjMzI3NzI",
+      "sourceUrl": "https://www.hirose.com/en/product/p/CL0767-0084-6-00",
+      "drawingUrl": "https://www.hirose.com/en/product/document?clcode=CL0767-0084-6-00&productname=GT17H-4S-2C&series=GT17H__HN&documenttype=2DDrawing&lang=en&documentid=0000967711",
+      "cadReferenceUrl": "https://www.hirose.com/en/product/document?clcode=CL0767-0084-6-00&productname=GT17H-4S-2C&series=GT17H__HN&documenttype=3DDrawing_STEP&lang=en&documentid=0001317088S"
+    }
+  }
+]

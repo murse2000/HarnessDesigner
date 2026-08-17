@@ -89,6 +89,8 @@ export interface PinDefinition {
   sealPartId?: Id;
 }
 
+export type HarnessReleaseStatus = "draft" | "inReview" | "released";
+
 export type HarnessNodeKind = "connector" | "splice" | "junction" | "lug" | "termination";
 
 export interface HarnessNode {
@@ -113,11 +115,19 @@ export interface HarnessSegment {
   sleevePartId?: Id;
   shieldPartId?: Id;
   tapePartId?: Id;
+  bendRadiusMm?: number;
   drawingRoute?: {
     offsetX: number;
     offsetY: number;
     sourceBreakoutLength?: number;
     targetBreakoutLength?: number;
+  };
+  threeDRoute?: {
+    controlPoints: Array<{
+      t: number;
+      offsetX: number;
+      offsetY: number;
+    }>;
   };
 }
 
@@ -131,6 +141,7 @@ export interface Termination {
   sealPartId?: Id;
   lugPartId?: Id;
   allowanceMm: number;
+  stripLengthMm?: number;
 }
 
 export interface Conductor {
@@ -149,9 +160,89 @@ export interface Conductor {
   shieldGroup?: string;
   cableRunId?: Id;
   cableCoreId?: string;
+  notes?: string;
+  currentA?: number;
+  voltageV?: number;
+  overrideLengthMm?: number;
   drawingRoute?: {
     bendX: number;
   };
+}
+
+export interface ManufacturingRules {
+  bundlePackingFactor: number;
+  maxBundleFillPercent: number;
+  minBendRadiusMultiplier: number;
+  maxVoltageDropPercent: number;
+  requireUnusedCavitySeal: boolean;
+  currency: string;
+  laborRatePerHour: number;
+  overheadPercent: number;
+}
+
+export type WorkInstructionKind = "preparation" | "assembly" | "inspection" | "packaging";
+
+export interface WorkInstruction {
+  id: Id;
+  harnessId: Id;
+  sequence: number;
+  kind: WorkInstructionKind;
+  title: string;
+  description: string;
+  estimatedMinutes: number;
+  partId?: Id;
+  imageDataUrl?: string;
+}
+
+export type EquipmentProfileKind = "wireProcessor" | "labelPrinter" | "tester";
+
+export interface EquipmentProfile {
+  id: Id;
+  name: string;
+  kind: EquipmentProfileKind;
+  delimiter: "," | ";" | "\t";
+  includeHeader: boolean;
+  enabled: boolean;
+}
+
+export interface HarnessVariant {
+  id: Id;
+  name: string;
+  description: string;
+  disabledConductorIds: Id[];
+  disabledAccessoryIds: Id[];
+}
+
+export interface SystemHarnessInstance {
+  id: Id;
+  harnessId: Id;
+  reference: string;
+  quantity: number;
+}
+
+export interface SystemAssembly {
+  id: Id;
+  name: string;
+  reference: string;
+  harnessInstances: SystemHarnessInstance[];
+}
+
+export type ProjectRole = "owner" | "editor" | "reviewer" | "viewer";
+
+export interface ProjectMember {
+  id: Id;
+  name: string;
+  role: ProjectRole;
+}
+
+export interface ReviewComment {
+  id: Id;
+  harnessId?: Id;
+  entityId?: Id;
+  author: string;
+  message: string;
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 export interface AccessoryPlacement {
@@ -159,7 +250,29 @@ export interface AccessoryPlacement {
   partId: Id;
   quantity: number;
   segmentId?: Id;
+  nodeId?: Id;
   note: string;
+}
+
+export type DrawingTableKind = "notes" | "materials" | "lengths";
+
+export type DrawingTableOffsets = Partial<Record<DrawingTableKind, Point>>;
+
+export type DrawingAnnotationKind = "label" | "text" | "image" | "rectangle" | "ellipse" | "arrow";
+
+export interface DrawingAnnotation {
+  id: Id;
+  kind: DrawingAnnotationKind;
+  text: string;
+  position: Point;
+  width: number;
+  height: number;
+  imageDataUrl?: string;
+  zIndex?: number;
+  flippedX?: boolean;
+  flippedY?: boolean;
+  fillColor?: string;
+  strokeColor?: string;
 }
 
 export interface HarnessAssembly {
@@ -167,10 +280,25 @@ export interface HarnessAssembly {
   number: string;
   name: string;
   revision: string;
+  releaseStatus?: HarnessReleaseStatus;
   nodes: HarnessNode[];
   segments: HarnessSegment[];
   conductors: Conductor[];
   accessories: AccessoryPlacement[];
+  drawingNotes?: string;
+  drawingTableOffsets?: DrawingTableOffsets;
+  drawingAnnotations?: DrawingAnnotation[];
+}
+
+export interface HarnessReleaseRecord {
+  id: Id;
+  harnessId: Id;
+  revision: string;
+  releasedAt: string;
+  releasedBy: string;
+  note: string;
+  fingerprint: string;
+  snapshot: HarnessAssembly;
 }
 
 export interface DocumentSettings {
@@ -182,7 +310,7 @@ export interface DocumentSettings {
 }
 
 export interface ProjectDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: Id;
   name: string;
   projectNumber: string;
@@ -194,6 +322,15 @@ export interface ProjectDocument {
   modelAssets: ModelAsset[];
   parts: PartSnapshot[];
   harnesses: HarnessAssembly[];
+  releaseHistory?: HarnessReleaseRecord[];
+  testRuns?: HarnessTestRun[];
+  manufacturingRules: ManufacturingRules;
+  workInstructions: WorkInstruction[];
+  equipmentProfiles: EquipmentProfile[];
+  variants: HarnessVariant[];
+  systems: SystemAssembly[];
+  members: ProjectMember[];
+  reviewComments: ReviewComment[];
 }
 
 export type ViewKind =
@@ -204,6 +341,7 @@ export type ViewKind =
   | "pinmap"
   | "cutlist"
   | "bom"
+  | "test"
   | "bottom"
   | "library"
   | "preview"
@@ -250,4 +388,58 @@ export interface CutListRow {
   color: string;
   gauge: string;
   lengthMm: number;
+  startStripLengthMm?: number;
+  endStripLengthMm?: number;
+  notes?: string;
+}
+
+export interface ContinuityTestRow {
+  conductorId: Id;
+  harnessId: Id;
+  harnessNumber: string;
+  reference: string;
+  fromConnector: string;
+  fromPin: string;
+  toConnector: string;
+  toPin: string;
+  color: string;
+  gauge: string;
+  cableCore: string;
+  expected: "CONTINUITY";
+}
+
+export type ContinuityTestResult = "untested" | "pass" | "fail";
+
+export interface ContinuityTestExecutionRow extends ContinuityTestRow {
+  result: ContinuityTestResult;
+  note: string;
+}
+
+export interface HarnessTestRun {
+  id: Id;
+  harnessId: Id;
+  harnessNumber: string;
+  revision: string;
+  serialNumber: string;
+  operator: string;
+  startedAt: string;
+  completedAt?: string;
+  rows: ContinuityTestExecutionRow[];
+}
+
+export interface ContinuityTestResultExportRow {
+  harnessNumber: string;
+  revision: string;
+  serialNumber: string;
+  operator: string;
+  startedAt: string;
+  completedAt: string;
+  reference: string;
+  fromConnector: string;
+  fromPin: string;
+  toConnector: string;
+  toPin: string;
+  expected: string;
+  result: ContinuityTestResult;
+  note: string;
 }

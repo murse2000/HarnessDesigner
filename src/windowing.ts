@@ -3,7 +3,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { ViewKind } from "./domain/types";
 import { isTauri } from "./platform";
 
-type BottomViewKind = Extract<ViewKind, "pinmap" | "cutlist" | "bom">;
+type BottomViewKind = Extract<ViewKind, "pinmap" | "cutlist" | "bom" | "test">;
 
 export interface DetachedViewOptions {
   harnessId?: string;

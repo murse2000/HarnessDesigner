@@ -17,6 +17,18 @@ export function defaultCableCores(count: number, current: CableCoreDefinition[] 
   });
 }
 
+export function validateCableCoreDefinitions(expectedCount: number, cores: CableCoreDefinition[]): string | null {
+  if (!Number.isInteger(expectedCount) || expectedCount <= 0 || cores.length !== expectedCount) {
+    return "심 수와 코어 정의 개수가 일치해야 합니다.";
+  }
+  if (cores.some((core) => !core.number.trim() || !core.name.trim() || !core.color.trim() || !core.gauge.trim())) {
+    return "모든 코어의 번호, 이름, 색상, Gauge를 입력하세요.";
+  }
+  const numbers = cores.map((core) => core.number.trim().toUpperCase());
+  if (new Set(numbers).size !== numbers.length) return "코어 번호는 중복될 수 없습니다.";
+  return null;
+}
+
 export function getCableCores(part: PartSnapshot): CableCoreDefinition[] {
   const count = Number(part.attributes.coreCount);
   let fallback = defaultCableCores(count).map((core) => ({ ...core, gauge: part.gauge ?? "" }));

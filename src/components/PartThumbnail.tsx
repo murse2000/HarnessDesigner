@@ -20,14 +20,24 @@ const categoryIcons: Record<PartCategory, ComponentType<{ size?: number }>> = {
   splice: GitFork,
 };
 
+function getOfficialImagePreview(part: PartSnapshot): PartPreview | undefined {
+  const dataUrl = part.attributes.officialImageUrl;
+  return dataUrl ? { kind: "photo", dataUrl, sourceName: "제조사 공식 제품 이미지" } : undefined;
+}
+
 export function PartThumbnail({ part, project, large = false }: { part: PartSnapshot; project?: ProjectDocument; large?: boolean }) {
-  const [preview, setPreview] = useState<PartPreview | undefined>(() => selectStoredPreview(part));
+  const [preview, setPreview] = useState<PartPreview | undefined>(() => selectStoredPreview(part) ?? getOfficialImagePreview(part));
 
   useEffect(() => {
     let cancelled = false;
     const stored = selectStoredPreview(part);
     if (stored) {
       setPreview(stored);
+      return;
+    }
+    const officialImage = getOfficialImagePreview(part);
+    if (officialImage) {
+      setPreview(officialImage);
       return;
     }
     setPreview(undefined);
@@ -51,7 +61,7 @@ export function PartThumbnail({ part, project, large = false }: { part: PartSnap
   const Icon = categoryIcons[part.category];
   const label = preview?.kind === "photo" ? "사진" : preview?.kind === "model" ? "3D" : preview?.kind === "drawing" ? "도면" : "기본 이미지";
   return <div className={`part-thumbnail${large ? " part-thumbnail--large" : ""}`} title={preview?.sourceName ?? label}>
-    {preview ? <img src={preview.dataUrl} alt={`${part.partNumber} ${label}`} /> : <Icon size={large ? 40 : 24} />}
+    {preview ? <img src={preview.dataUrl} alt={`${part.partNumber} ${label}`} onError={() => setPreview(undefined)} /> : <Icon size={large ? 40 : 24} />}
     <span>{label}</span>
   </div>;
 }

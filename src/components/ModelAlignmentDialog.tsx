@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ModelAsset, PartSnapshot } from "../domain/types";
 import { backendInvoke } from "../platform";
 import { useProjectStore } from "../store/projectStore";
+import { hydrateLibraryModelAsset } from "../three/modelAssetHydration";
 import { getModelPlacement, saveModelPlacement, type ModelPlacement } from "../three/modelPlacement";
 import { IconButton } from "./common";
 import { ModelPlacementControls } from "./ModelPlacementControls";
@@ -18,7 +19,7 @@ export function ModelAlignmentDialog({ part, onClose, onSaved }: { part: PartSna
   useEffect(() => {
     if (!part.modelAssetId) return;
     void backendInvoke<ModelAsset | null>("get_library_model_asset", { assetId: part.modelAssetId })
-      .then((loaded) => loaded ? setAsset(loaded) : setError("등록된 STEP 자산을 찾을 수 없습니다."))
+      .then(async (loaded) => loaded ? setAsset(await hydrateLibraryModelAsset(loaded)) : setError("등록된 STEP 자산을 찾을 수 없습니다."))
       .catch((reason) => setError(String(reason)));
   }, [part.modelAssetId]);
 

@@ -2,8 +2,9 @@ import type { ProjectDocument, ValidationIssue } from "./types";
 import type { ValidationCode, ValidationLevel } from "../preferences";
 import { getCableConductors, getCableCores } from "./cables";
 import { pinConductorCapacity } from "./pinCapacity";
+import { validateManufacturingRules } from "./production";
 
-export function validateProject(project: ProjectDocument, rules?: Record<ValidationCode, ValidationLevel>): ValidationIssue[] {
+export function validateProject(project: ProjectDocument, rules?: Partial<Record<ValidationCode, ValidationLevel>>): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const partIds = new Set(project.parts.map((part) => part.id));
 
@@ -17,6 +18,14 @@ export function validateProject(project: ProjectDocument, rules?: Record<Validat
     const nodes = new Map(harness.nodes.map((node) => [node.id, node]));
     const segments = new Map(harness.segments.map((segment) => [segment.id, segment]));
     const occupiedPins = new Map<string, number>();
+    const duplicateReferences = [
+      ...duplicates(harness.nodes.map((item) => ({ id: item.id, value: item.reference }))),
+      ...duplicates(harness.segments.map((item) => ({ id: item.id, value: item.label }))),
+      ...duplicates(harness.conductors.map((item) => ({ id: item.id, value: item.reference }))),
+    ];
+    for (const entity of duplicateReferences) {
+      issues.push(issue("error", "DUPLICATE_REFERENCE", "validation.duplicateReference", entity.id, harness.id, entity.value));
+    }
 
     for (const segment of harness.segments) {
       if (!nodes.has(segment.fromNodeId) || !nodes.has(segment.toNodeId)) {
@@ -91,10 +100,20 @@ export function validateProject(project: ProjectDocument, rules?: Record<Validat
       }
     }
   }
+  issues.push(...validateManufacturingRules(project));
   return rules ? issues.flatMap((item) => {
     const level = rules[item.code as ValidationCode];
     return level === "off" ? [] : [{ ...item, severity: level ?? item.severity }];
   }) : issues;
+}
+
+function duplicates(items: Array<{ id: string; value: string }>): Array<{ id: string; value: string }> {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const value = item.value.trim().toLocaleUpperCase();
+    if (!value || !seen.has(value)) { if (value) seen.add(value); return false; }
+    return true;
+  });
 }
 
 function parsePartIds(value?: string): string[] {

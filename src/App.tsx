@@ -2,11 +2,11 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import {
-  Box, Boxes, Cable, ChevronDown, CircleAlert, Download, ExternalLink, FilePlus2, FolderOpen,
-  Languages, Moon, PanelBottom, Plus, Redo2, Save, Search, Settings2, Sun, Undo2, ZoomIn,
+  Box, Boxes, Cable, ChevronDown, CircleAlert, Download, ExternalLink, Factory, FilePlus2, FolderOpen, ImagePlus,
+  Circle, Languages, Moon, MoveRight, PanelBottom, Plus, Redo2, Save, Search, Settings2, Square, Sun, Tag, Type, Undo2, Wrench, ZoomIn,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { HarnessAssembly, SessionSnapshot, ViewKind } from "./domain/types";
+import type { DrawingAnnotationKind, HarnessAssembly, SessionSnapshot, ViewKind } from "./domain/types";
 import { createProject } from "./domain/sample";
 import { translate } from "./i18n";
 import { backendInvoke, isTauri } from "./platform";
@@ -14,6 +14,7 @@ import { useProjectStore } from "./store/projectStore";
 import { exportProject } from "./export/exportProject";
 import { findDockTarget, installWindowPlacement, openDesignWindow, openDetachedView, openLibraryWindow, openProjectWorkspace, type DockTarget } from "./windowing";
 import { BomView, CutListView, PinMapView, ValidationBar } from "./components/DataViews";
+import { ContinuityTestView } from "./components/TestExecutionView";
 import { HarnessCanvas } from "./components/HarnessCanvas";
 import { Inspector } from "./components/Inspector";
 import { LibraryView } from "./components/LibraryView";
@@ -29,6 +30,9 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { applyNewProjectDefaults, appFontStack } from "./preferences";
 import { shortcutMatches } from "./preferences";
 import { RecoveryDialog, type RecoveryEntry } from "./components/RecoveryDialog";
+import { PowerToolsDialog } from "./components/PowerToolsDialog";
+import { ProductionCenterDialog } from "./components/ProductionCenterDialog";
+import { canProjectRole } from "./domain/permissions";
 
 const params = new URLSearchParams(window.location.search);
 const initialSessionId = params.get("session") ?? undefined;
@@ -60,7 +64,20 @@ interface MovePanelOwnerRequest {
   panel: FloatingPanel;
   fromHostWindowLabel: string;
   toHostWindowLabel: string;
-  bottomView?: "pinmap" | "cutlist" | "bom";
+  bottomView?: "pinmap" | "cutlist" | "bom" | "test";
+}
+
+type AppCommandId = keyof ReturnType<typeof useProjectStore.getState>["preferences"]["shortcuts"];
+
+const commandLabels: Record<AppCommandId, string> = {
+  newProject: "새 프로젝트", openProject: "프로젝트 열기", saveProject: "프로젝트 저장", undo: "실행 취소", redo: "다시 실행", settings: "환경설정", commandPalette: "명령 검색",
+  addConnector: "커넥터 추가", addCable: "멀티코어 케이블 추가", addWire: "핀맵 연결 추가", addLabel: "라벨 추가", addText: "텍스트 추가", addImage: "이미지 첨부",
+  addRectangle: "사각형 추가", addEllipse: "타원 추가", addArrow: "화살표 추가", powerTools: "하네스 파워 도구", productionCenter: "생산 엔지니어링 센터",
+  deleteSelection: "선택 객체 삭제", fitView: "전체 화면 맞춤", toggleBottom: "하단 패널 전환", open3D: "3D 하네스 열기",
+};
+
+function dispatchAppCommand(command: AppCommandId) {
+  window.dispatchEvent(new CustomEvent("harness-command", { detail: command }));
 }
 
 export default function App() {
@@ -70,6 +87,8 @@ export default function App() {
   const [floatingPanels, setFloatingPanels] = useState<Set<FloatingPanel>>(() => new Set());
   const [exportState, setExportState] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [powerToolsOpen, setPowerToolsOpen] = useState(false);
+  const [productionCenterOpen, setProductionCenterOpen] = useState(false);
   const [recoveries, setRecoveries] = useState<RecoveryEntry[]>([]);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const restorePanel = useCallback((panel: FloatingPanel) => {
@@ -107,16 +126,16 @@ export default function App() {
     const handleShortcut = (event: KeyboardEvent) => {
       if ((event.target as HTMLElement)?.matches("input, textarea, select") || document.querySelector(".modal-backdrop")) return;
       const shortcuts = store.preferences.shortcuts;
-      const command = shortcutMatches(event, shortcuts.newProject) ? "new" : shortcutMatches(event, shortcuts.openProject) ? "open" : shortcutMatches(event, shortcuts.saveProject) ? "save" : shortcutMatches(event, shortcuts.undo) ? "undo" : shortcutMatches(event, shortcuts.redo) ? "redo" : shortcutMatches(event, shortcuts.settings) ? "settings" : null;
+      const command = (Object.keys(shortcuts) as AppCommandId[]).find((key) => shortcutMatches(event, shortcuts[key]));
       if (!command) return;
       event.preventDefault();
       if (command === "undo") void store.undo();
-      if (command === "redo") void store.redo();
-      if (command === "settings") setSettingsOpen(true);
-      if (command === "new" || command === "open" || command === "save") {
+      else if (command === "redo") void store.redo();
+      else if (command === "settings") setSettingsOpen(true);
+      else if (command === "newProject" || command === "openProject" || command === "saveProject") {
         const buttons = document.querySelectorAll<HTMLButtonElement>(".command-bar > .command-group button");
-        buttons[command === "new" ? 0 : command === "open" ? 1 : 2]?.click();
-      }
+        buttons[command === "newProject" ? 0 : command === "openProject" ? 1 : 2]?.click();
+      } else dispatchAppCommand(command);
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
@@ -125,7 +144,7 @@ export default function App() {
     if (initialHarnessId && store.snapshot?.project.harnesses.some((item) => item.id === initialHarnessId)) store.setActiveHarness(initialHarnessId);
   }, [store.snapshot?.sessionId]);
   useEffect(() => {
-    if (initialView === "bottom" && (initialBottomView === "pinmap" || initialBottomView === "cutlist" || initialBottomView === "bom")) store.setBottomView(initialBottomView);
+    if (initialView === "bottom" && (initialBottomView === "pinmap" || initialBottomView === "cutlist" || initialBottomView === "bom" || initialBottomView === "test")) store.setBottomView(initialBottomView);
   }, []);
   useEffect(() => {
     if (view !== "workspace" || !store.snapshot || !isTauri()) return;
@@ -201,7 +220,7 @@ export default function App() {
       try { setExportState("출력 생성 중…"); const result = await exportProject(store.snapshot!.project); setExportState(`출력 완료 · ${result}`); }
       catch (error) { store.clearError(); setExportState(String(error)); }
     }} />
-    <ToolBar harness={activeHarness} bottomOpen={bottomOpen} setBottomOpen={setBottomOpen} />
+    <ToolBar harness={activeHarness} bottomOpen={bottomOpen} setBottomOpen={setBottomOpen} onPowerTools={() => setPowerToolsOpen(true)} onProductionCenter={() => setProductionCenterOpen(true)} />
     <main className={workspaceClasses}>
       {!floatingPanels.has("navigator") && <Navigator onDetach={() => floatPanel("navigator")} />}
       <section className="center-workspace"><DocumentWorkspace bottomDock={bottomOpen ? <BottomDock onDetach={() => floatPanel("bottom")} /> : undefined} /></section>
@@ -209,11 +228,23 @@ export default function App() {
     </main>
     <StatusBar exportState={exportState} />
     {store.error && <button className="error-toast" onClick={store.clearError}><CircleAlert size={14} /><span>{store.error}</span></button>}
-  </div><GlobalDialogs />{settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}{recoveryOpen && <RecoveryDialog entries={recoveries} onChange={setRecoveries} onClose={() => setRecoveryOpen(false)} />}</>;
+  </div><GlobalDialogs />{settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}{powerToolsOpen && <PowerToolsDialog onClose={() => setPowerToolsOpen(false)} />}{productionCenterOpen && <ProductionCenterDialog onClose={() => setProductionCenterOpen(false)} />}{recoveryOpen && <RecoveryDialog entries={recoveries} onChange={setRecoveries} onClose={() => setRecoveryOpen(false)} />}</>;
 }
 
 function CommandBar({ onExport, onSettings }: { onExport: () => Promise<void>; onSettings: () => void }) {
   const { snapshot, locale, theme, setTheme, setLocale, setSnapshot, preferences } = useProjectStore();
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const commandInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const handleCommand = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== "commandPalette") return;
+      setCommandOpen(true);
+      window.setTimeout(() => commandInput.current?.focus(), 0);
+    };
+    window.addEventListener("harness-command", handleCommand);
+    return () => window.removeEventListener("harness-command", handleCommand);
+  }, []);
   if (!snapshot) return null;
   const newProject = async () => {
     const project = createProject("NEW HARNESS PROJECT");
@@ -237,18 +268,82 @@ function CommandBar({ onExport, onSettings }: { onExport: () => Promise<void>; o
     if (!path) return;
     setSnapshot(await backendInvoke("save_project", { sessionId: snapshot.sessionId, path }));
   };
+  const runCommand = (command: AppCommandId) => {
+    setCommandOpen(false);
+    setCommandQuery("");
+    if (command === "newProject") void newProject();
+    else if (command === "openProject") void openProject();
+    else if (command === "saveProject") void saveProject();
+    else if (command === "undo") void useProjectStore.getState().undo();
+    else if (command === "redo") void useProjectStore.getState().redo();
+    else if (command === "settings") onSettings();
+    else dispatchAppCommand(command);
+  };
+  const visibleCommands = (Object.keys(commandLabels) as AppCommandId[]).filter((command) => command !== "commandPalette" && commandLabels[command].toLowerCase().includes(commandQuery.trim().toLowerCase()));
   return <header className="command-bar">
     <div className="brand"><div className="brand-mark"><Cable size={17} /></div><strong>Harness Designer</strong><span>DESKTOP</span></div>
     <div className="command-group"><button onClick={() => void newProject()}><FilePlus2 size={14} />{translate(locale, "newProject")}</button><button onClick={() => void openProject()}><FolderOpen size={14} />{translate(locale, "openProject")}</button><button onClick={() => void saveProject()} disabled={snapshot.readOnly}><Save size={14} />{translate(locale, "save")}</button><button onClick={() => void openLibraryWindow(snapshot.sessionId)}><Boxes size={14} />{translate(locale, "library")}</button></div>
-    <div className="command-search"><Search size={13} /><input placeholder="명령, 부품, 하네스 검색…" /><kbd>⌘ K</kbd></div>
+    <div className={`command-search ${commandOpen ? "is-open" : ""}`}><Search size={13} /><input ref={commandInput} value={commandQuery} placeholder="명령 검색…" onFocus={() => setCommandOpen(true)} onChange={(event) => { setCommandQuery(event.target.value); setCommandOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" && visibleCommands[0]) runCommand(visibleCommands[0]); if (event.key === "Escape") { setCommandOpen(false); commandInput.current?.blur(); } }} onBlur={() => window.setTimeout(() => setCommandOpen(false), 120)} /><kbd>{preferences.shortcuts.commandPalette}</kbd>{commandOpen && <div className="command-palette">{visibleCommands.map((command) => <button key={command} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand(command)}><span>{commandLabels[command]}</span><kbd>{preferences.shortcuts[command]}</kbd></button>)}{visibleCommands.length === 0 && <p>일치하는 명령이 없습니다.</p>}</div>}</div>
     <div className="command-group command-group--right"><button onClick={() => void onExport()}><Download size={14} />{translate(locale, "export")}</button><IconButton title="언어 전환" onClick={() => setLocale(locale === "ko" ? "en" : "ko")}><Languages size={14} /></IconButton><IconButton title="테마 전환" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={14} /> : <Sun size={14} />}</IconButton><IconButton title="환경설정" onClick={onSettings}><Settings2 size={14} /></IconButton></div>
   </header>;
 }
 
-function ToolBar({ harness, bottomOpen, setBottomOpen }: { harness?: HarnessAssembly; bottomOpen: boolean; setBottomOpen: (value: boolean) => void }) {
-  const { snapshot, locale, undo, redo, uiScale, setUiScale, activeHarnessId, openConnectorPicker, openPinMapEditor, openCableRunEditor } = useProjectStore();
+function ToolBar({ harness, bottomOpen, setBottomOpen, onPowerTools, onProductionCenter }: { harness?: HarnessAssembly; bottomOpen: boolean; setBottomOpen: (value: boolean) => void; onPowerTools: () => void; onProductionCenter: () => void }) {
+  const { snapshot, locale, undo, redo, uiScale, setUiScale, activeHarnessId, updateProject, selectEntity, openConnectorPicker, openPinMapEditor, openCableRunEditor } = useProjectStore();
+  const activeMember = snapshot?.project.members.find((member) => member.id === useProjectStore.getState().preferences.currentProjectMemberId);
+  const canDesign = canProjectRole(activeMember?.role, "design");
+  const imageInput = useRef<HTMLInputElement>(null);
+  const addAnnotation = useCallback((kind: DrawingAnnotationKind, imageDataUrl?: string, imageName?: string) => {
+    if (!harness || harness.releaseStatus === "released") return;
+    const id = crypto.randomUUID();
+    const count = harness.drawingAnnotations?.length ?? 0;
+    void updateProject((project) => {
+      const target = project.harnesses.find((item) => item.id === harness.id);
+      if (!target) return;
+      target.drawingAnnotations = [...(target.drawingAnnotations ?? []), {
+        id, kind,
+        text: kind === "label" ? "LABEL" : kind === "text" ? "메모를 입력하세요" : kind === "image" ? imageName ?? "도면 첨부 이미지" : kind === "arrow" ? "ARROW" : kind.toUpperCase(),
+        position: { x: 260 + (count % 6) * 24, y: 120 + (count % 6) * 24 },
+        width: kind === "label" ? 140 : kind === "arrow" ? 220 : 220,
+        height: kind === "label" ? 36 : kind === "text" ? 90 : kind === "arrow" ? 44 : 160,
+        imageDataUrl,
+        zIndex: count,
+        fillColor: "#ffffff",
+        strokeColor: "#1f668f",
+      }];
+    }).then(() => selectEntity(id, "annotation"));
+  }, [harness, selectEntity, updateProject]);
+  const chooseImage = useCallback(() => imageInput.current?.click(), []);
+  useEffect(() => {
+    const handleCommand = (event: Event) => {
+      const command = (event as CustomEvent<AppCommandId>).detail;
+      const released = harness?.releaseStatus === "released";
+      if (command === "addConnector" && canDesign && harness && !released) openConnectorPicker();
+      if (command === "addCable" && canDesign && harness && !released && harness.nodes.filter((node) => node.kind === "connector").length >= 2) openCableRunEditor();
+      if (command === "addWire" && canDesign && harness && !released && harness.nodes.length >= 2) openPinMapEditor();
+      if (command === "addLabel" && canDesign) addAnnotation("label");
+      if (command === "addText" && canDesign) addAnnotation("text");
+      if (command === "addImage" && canDesign) chooseImage();
+      if (command === "addRectangle" && canDesign) addAnnotation("rectangle");
+      if (command === "addEllipse" && canDesign) addAnnotation("ellipse");
+      if (command === "addArrow" && canDesign) addAnnotation("arrow");
+      if (command === "powerTools" && canDesign) onPowerTools();
+      if (command === "productionCenter") onProductionCenter();
+      if (command === "toggleBottom") setBottomOpen(!bottomOpen);
+      if (command === "open3D" && snapshot && harness) void openDetachedView(snapshot.sessionId, "threeD", { harnessId: activeHarnessId ?? undefined });
+    };
+    window.addEventListener("harness-command", handleCommand);
+    return () => window.removeEventListener("harness-command", handleCommand);
+  }, [activeHarnessId, addAnnotation, bottomOpen, canDesign, chooseImage, harness, onPowerTools, onProductionCenter, openCableRunEditor, openConnectorPicker, openPinMapEditor, setBottomOpen, snapshot]);
   if (!snapshot) return null;
-  return <div className="tool-bar"><div className="tool-group"><IconButton title={translate(locale, "undo")} onClick={() => void undo()}><Undo2 size={14} /></IconButton><IconButton title={translate(locale, "redo")} onClick={() => void redo()}><Redo2 size={14} /></IconButton></div><div className="separator" /><div className="tool-group"><button onClick={() => openConnectorPicker()}><Plus size={13} />Connector</button><button onClick={() => openCableRunEditor()} disabled={!harness || harness.nodes.filter((node) => node.kind === "connector").length < 2}><Plus size={13} />Cable</button><button onClick={() => openPinMapEditor()} disabled={!harness || harness.nodes.length < 2}><Plus size={13} />Wire</button></div><div className="separator" /><button className="harness-selector"><Cable size={13} /><strong>{harness?.number ?? "NO HARNESS"}</strong><span>{harness?.name}</span><ChevronDown size={12} /></button><div className="tool-spacer" /><div className="scale-control"><ZoomIn size={13} /><input type="range" min="80" max="140" step="5" value={uiScale} onChange={(event) => setUiScale(Number(event.target.value))} /><span>{uiScale}%</span></div><button onClick={() => void openDetachedView(snapshot.sessionId, "threeD", { harnessId: activeHarnessId ?? undefined })} disabled={!harness}><Box size={13} />3D Harness</button><IconButton title="새 설계 창에서 열기" onClick={() => void openDesignWindow(snapshot.sessionId, activeHarnessId ?? undefined)}><ExternalLink size={14} /></IconButton><IconButton title="하단 패널" className={bottomOpen ? "is-active" : ""} onClick={() => setBottomOpen(!bottomOpen)}><PanelBottom size={14} /></IconButton></div>;
+  const released = harness?.releaseStatus === "released";
+  const editDisabled = !canDesign || !harness || released;
+  return <div className="tool-bar">
+    <div className="tool-group"><IconButton title={`${translate(locale, "undo")} · ${useProjectStore.getState().preferences.shortcuts.undo}`} disabled={!canDesign} onClick={() => void undo()}><Undo2 size={14} /></IconButton><IconButton title={`${translate(locale, "redo")} · ${useProjectStore.getState().preferences.shortcuts.redo}`} disabled={!canDesign} onClick={() => void redo()}><Redo2 size={14} /></IconButton></div><div className="separator" />
+    <div className="tool-group"><button title={useProjectStore.getState().preferences.shortcuts.addConnector} onClick={() => openConnectorPicker()} disabled={editDisabled}><Plus size={13} />Connector</button><button title={useProjectStore.getState().preferences.shortcuts.addCable} onClick={() => openCableRunEditor()} disabled={editDisabled || (harness?.nodes.filter((node) => node.kind === "connector").length ?? 0) < 2}><Plus size={13} />Cable</button><button title={useProjectStore.getState().preferences.shortcuts.addWire} onClick={() => openPinMapEditor()} disabled={editDisabled || (harness?.nodes.length ?? 0) < 2}><Plus size={13} />Wire</button></div><div className="separator" />
+    <div className="tool-group tool-group--annotations"><button title={`라벨 추가 · ${useProjectStore.getState().preferences.shortcuts.addLabel}`} onClick={() => addAnnotation("label")} disabled={editDisabled}><Tag size={13} />Label</button><button title={`텍스트 추가 · ${useProjectStore.getState().preferences.shortcuts.addText}`} onClick={() => addAnnotation("text")} disabled={editDisabled}><Type size={13} />Text</button><button title={`이미지 첨부 · ${useProjectStore.getState().preferences.shortcuts.addImage}`} onClick={chooseImage} disabled={editDisabled}><ImagePlus size={13} />Image</button><button title={`사각형 · ${useProjectStore.getState().preferences.shortcuts.addRectangle}`} onClick={() => addAnnotation("rectangle")} disabled={editDisabled}><Square size={13} /></button><button title={`타원 · ${useProjectStore.getState().preferences.shortcuts.addEllipse}`} onClick={() => addAnnotation("ellipse")} disabled={editDisabled}><Circle size={13} /></button><button title={`화살표 · ${useProjectStore.getState().preferences.shortcuts.addArrow}`} onClick={() => addAnnotation("arrow")} disabled={editDisabled}><MoveRight size={13} /></button><input ref={imageInput} className="tool-file-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; if (file.size > 10 * 1024 * 1024) { window.alert("이미지는 10 MB 이하의 PNG, JPEG 또는 WebP 파일만 첨부할 수 있습니다."); return; } const reader = new FileReader(); reader.onload = () => typeof reader.result === "string" && addAnnotation("image", reader.result, file.name); reader.readAsDataURL(file); }} /></div><div className="separator" />
+    <button title={useProjectStore.getState().preferences.shortcuts.powerTools} onClick={onPowerTools} disabled={!harness || !canDesign}><Wrench size={13} />Power Tools</button><button title={useProjectStore.getState().preferences.shortcuts.productionCenter} onClick={onProductionCenter}><Factory size={13} />Production</button><button className="harness-selector"><Cable size={13} /><strong>{harness?.number ?? "NO HARNESS"}</strong><span>{harness?.name}</span><ChevronDown size={12} /></button><div className="tool-spacer" /><div className="scale-control"><ZoomIn size={13} /><input type="range" min="80" max="140" step="5" value={uiScale} onChange={(event) => setUiScale(Number(event.target.value))} /><span>{uiScale}%</span></div><button onClick={() => void openDetachedView(snapshot.sessionId, "threeD", { harnessId: activeHarnessId ?? undefined })} disabled={!harness}><Box size={13} />3D Harness</button><IconButton title="새 설계 창에서 열기" onClick={() => void openDesignWindow(snapshot.sessionId, activeHarnessId ?? undefined)}><ExternalLink size={14} /></IconButton><IconButton title="하단 패널" className={bottomOpen ? "is-active" : ""} onClick={() => setBottomOpen(!bottomOpen)}><PanelBottom size={14} /></IconButton>
+  </div>;
 }
 
 function GlobalDialogs() {
@@ -260,7 +355,7 @@ function GlobalDialogs() {
 
 function BottomDock({ onDetach }: { onDetach?: () => void } = {}) {
   const { bottomView, setBottomView, locale } = useProjectStore();
-  return <section className="bottom-dock"><div className="dock-tabs"><button className={bottomView === "pinmap" ? "is-active" : ""} onClick={() => setBottomView("pinmap")}>{translate(locale, "pinmap")}</button><button className={bottomView === "cutlist" ? "is-active" : ""} onClick={() => setBottomView("cutlist")}>{translate(locale, "cutlist")}</button><button className={bottomView === "bom" ? "is-active" : ""} onClick={() => setBottomView("bom")}>{translate(locale, "bom")}</button>{onDetach && <IconButton title="하단 패널을 플로팅 창으로 분리" onClick={onDetach}><ExternalLink size={13} /></IconButton>}</div><div className="dock-content">{bottomView === "pinmap" ? <PinMapView /> : bottomView === "cutlist" ? <CutListView /> : <BomView />}</div></section>;
+  return <section className="bottom-dock"><div className="dock-tabs"><button className={bottomView === "pinmap" ? "is-active" : ""} onClick={() => setBottomView("pinmap")}>{translate(locale, "pinmap")}</button><button className={bottomView === "cutlist" ? "is-active" : ""} onClick={() => setBottomView("cutlist")}>{translate(locale, "cutlist")}</button><button className={bottomView === "bom" ? "is-active" : ""} onClick={() => setBottomView("bom")}>{translate(locale, "bom")}</button><button className={bottomView === "test" ? "is-active" : ""} onClick={() => setBottomView("test")}>{translate(locale, "test")}</button>{onDetach && <IconButton title="하단 패널을 플로팅 창으로 분리" onClick={onDetach}><ExternalLink size={13} /></IconButton>}</div><div className="dock-content">{bottomView === "pinmap" ? <PinMapView /> : bottomView === "cutlist" ? <CutListView /> : bottomView === "bom" ? <BomView /> : <ContinuityTestView />}</div></section>;
 }
 
 function DetachedView({ view }: { view: ViewKind }) {
@@ -369,6 +464,7 @@ function DetachedView({ view }: { view: ViewKind }) {
     if (view === "pinmap") return <PinMapView />;
     if (view === "cutlist") return <CutListView />;
     if (view === "bom") return <BomView />;
+    if (view === "test") return <ContinuityTestView />;
     if (view === "bottom") return <BottomDock />;
     if (view === "library") return <LibraryView />;
     if (view === "preview") return <PreviewView />;

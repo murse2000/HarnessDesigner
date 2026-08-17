@@ -1,6 +1,8 @@
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { PinConnectionPreset } from "../domain/pinmap";
+import { releasedHarnessEditViolation } from "../domain/release";
+import { canProjectRole, type ProjectPermission } from "../domain/permissions";
 import { createProject } from "../domain/sample";
 import type { ProjectDocument, SessionSnapshot, ViewKind } from "../domain/types";
 import type { Locale } from "../i18n";
@@ -11,12 +13,12 @@ interface ProjectState {
   snapshot: SessionSnapshot | null;
   activeHarnessId: string | null;
   selectedEntityId: string | null;
-  selectedEntityType: "node" | "segment" | "conductor" | null;
+  selectedEntityType: "node" | "segment" | "conductor" | "annotation" | null;
   locale: Locale;
   theme: "light" | "dark";
   uiScale: number;
   preferences: AppPreferences;
-  bottomView: Extract<ViewKind, "pinmap" | "cutlist" | "bom">;
+  bottomView: Extract<ViewKind, "pinmap" | "cutlist" | "bom" | "test">;
   busy: boolean;
   error: string | null;
   connectorPicker: { mode: "add" | "replace"; nodeId?: string; partId?: string } | null;
@@ -24,16 +26,16 @@ interface ProjectState {
   cableRunEditor: { segmentId?: string } | null;
   initialize: (sessionId?: string) => Promise<void>;
   replaceProject: (project: ProjectDocument) => Promise<void>;
-  updateProject: (mutator: (project: ProjectDocument) => void) => Promise<void>;
+  updateProject: (mutator: (project: ProjectDocument) => void, permission?: ProjectPermission) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   setActiveHarness: (id: string) => void;
-  selectEntity: (id: string | null, type?: "node" | "segment" | "conductor") => void;
+  selectEntity: (id: string | null, type?: "node" | "segment" | "conductor" | "annotation") => void;
   setLocale: (locale: Locale) => void;
   setTheme: (theme: "light" | "dark") => void;
   setUiScale: (scale: number) => void;
   setPreferences: (preferences: AppPreferences) => void;
-  setBottomView: (view: Extract<ViewKind, "pinmap" | "cutlist" | "bom">) => void;
+  setBottomView: (view: Extract<ViewKind, "pinmap" | "cutlist" | "bom" | "test">) => void;
   setSnapshot: (snapshot: SessionSnapshot) => void;
   clearError: () => void;
   openConnectorPicker: (mode?: "add" | "replace", nodeId?: string, partId?: string) => void;
@@ -85,7 +87,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         eventCleanup = await listen<SessionSnapshot>(`project-changed:${snapshot.sessionId}`, ({ payload }) => {
           get().setSnapshot(payload);
         });
-        selectionCleanup = await listen<{ id: string | null; type: "node" | "segment" | "conductor" | null }>(`selection-changed:${snapshot.sessionId}`, ({ payload }) => {
+        selectionCleanup = await listen<{ id: string | null; type: "node" | "segment" | "conductor" | "annotation" | null }>(`selection-changed:${snapshot.sessionId}`, ({ payload }) => {
           set({ selectedEntityId: payload.id, selectedEntityType: payload.type });
         });
         preferencesCleanup = await listen<AppSettingsEvent>("app-settings-changed", ({ payload }) => {
@@ -118,11 +120,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  updateProject: async (mutator) => {
+  updateProject: async (mutator, permission = "design") => {
     const current = get().snapshot;
     if (!current) return;
+    const activeMember = current.project.members.find((member) => member.id === get().preferences.currentProjectMemberId);
+    if (!canProjectRole(activeMember?.role, permission)) {
+      set({ error: `${activeMember?.name ?? "현재 사용자"}에게 ${permission === "review" ? "검토" : permission === "admin" ? "권한 관리" : "설계 편집"} 권한이 없습니다.` });
+      return;
+    }
     const project = structuredClone(current.project);
-    mutator(project);
+    try { mutator(project); }
+    catch (error) { set({ error: String(error) }); return; }
+    const lockedHarnessId = releasedHarnessEditViolation(current.project, project);
+    if (lockedHarnessId) {
+      const harness = current.project.harnesses.find((item) => item.id === lockedHarnessId);
+      set({ error: `릴리즈된 하네스 ${harness?.number ?? lockedHarnessId}는 수정할 수 없습니다. 다음 리비전을 시작하세요.` });
+      return;
+    }
     project.updatedAt = new Date().toISOString();
     await get().replaceProject(project);
   },

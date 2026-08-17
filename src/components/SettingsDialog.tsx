@@ -1,4 +1,5 @@
 import { emit } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import { join } from "@tauri-apps/api/path";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Box, Database, FileOutput, Grid3X3, HardDrive, RotateCcw, Save, Settings2, ShieldCheck, Type, X } from "lucide-react";
@@ -29,6 +30,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [copyExisting, setCopyExisting] = useState(true);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [lastCrashReport, setLastCrashReport] = useState(() => window.localStorage.getItem("hd.lastCrashReport") ?? "");
 
   const loadLibraryStatus = () => {
     if (!isTauri()) return;
@@ -116,6 +119,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     } catch (reason) { setError(String(reason)); }
   };
   const resetDefaults = () => { setDraft(structuredClone(defaultAppPreferences)); setLocale("ko"); setTheme("light"); setUiScale(100); };
+  const checkForUpdates = async () => {
+    if (!draft.updateManifestUrl.trim()) { setError("업데이트 매니페스트 URL을 입력하세요."); return; }
+    try {
+      const response = await fetch(draft.updateManifestUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const manifest = await response.json() as { version?: string; downloadUrl?: string };
+      if (!manifest.version) throw new Error("매니페스트에 version이 없습니다.");
+      const current = isTauri() ? await getVersion() : "0.1.0";
+      setUpdateStatus(manifest.version === current ? `최신 버전입니다. (${current})` : `새 버전 ${manifest.version} 사용 가능 · 현재 ${current}${manifest.downloadUrl ? ` · ${manifest.downloadUrl}` : ""}`);
+      setError(null);
+    } catch (reason) { setError(`업데이트 확인 실패: ${String(reason)}`); }
+  };
 
   return <div className="modal-backdrop"><section className="settings-dialog" role="dialog" aria-modal="true" aria-label="환경설정">
     <header><div><Settings2 size={15} /><strong>환경설정</strong><span>모든 창에 동기화되는 사용자별 설정입니다.</span></div><IconButton title="닫기" onClick={onClose}><X size={14} /></IconButton></header>
@@ -136,6 +151,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <Field label="UI 배율"><Range value={uiScale} min={80} max={140} step={5} suffix="%" onChange={setUiScale} /></Field>
           <Field label="글꼴"><select value={draft.fontFamily} onChange={(event) => setPreference("fontFamily", event.target.value as AppPreferences["fontFamily"])}><option value="noto">Noto Sans KR</option><option value="system">운영체제 기본 글꼴</option></select></Field>
           <Field label="기본 글자 크기"><Range value={draft.fontSize} min={10} max={16} step={1} suffix="px" onChange={(value) => setPreference("fontSize", value)} /></Field>
+          <Field label="업데이트 채널"><select value={draft.updateChannel} onChange={(event) => setPreference("updateChannel", event.target.value as "stable" | "beta")}><option value="stable">Stable</option><option value="beta">Beta</option></select></Field>
+          <Field label="업데이트 URL"><input placeholder="https://example.com/stable.json" value={draft.updateManifestUrl} onChange={(event) => setPreference("updateManifestUrl", event.target.value)} /></Field>
+          <div className="settings-actions"><button onClick={() => void checkForUpdates()}>업데이트 확인</button>{updateStatus && <span>{updateStatus}</span>}</div>
           <div className="settings-actions"><button onClick={() => void exportSettings()}>설정 프로필 내보내기</button><button onClick={() => void importSettings()}>설정 프로필 가져오기</button></div>
         </SettingsGroup>}
         {section === "editor" && <SettingsGroup title="편집기" description="2D 도면의 이동, 표시, 수치 형식을 제어합니다.">
@@ -161,6 +179,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <Field label="용지 / 언어 / JPG"><div className="settings-triple"><select value={template.paper} onChange={(event) => updateTemplate({ ...template, paper: event.target.value as "A3" | "A4" })}><option value="A3">A3</option><option value="A4">A4</option></select><select value={template.outputLanguage} onChange={(event) => updateTemplate({ ...template, outputLanguage: event.target.value as DrawingTemplate["outputLanguage"] })}><option value="ko-en">한영 병기</option><option value="ko">한국어</option><option value="en">English</option></select><select value={template.imageDpi} onChange={(event) => updateTemplate({ ...template, imageDpi: Number(event.target.value) as 150 | 300 | 600 })}><option value="150">150 DPI</option><option value="300">300 DPI</option><option value="600">600 DPI</option></select></div></Field>
           <Toggle label="2D 시트 템플릿 표시" description="2D 도면에 외곽선, 구역 좌표와 제목란을 표시합니다." checked={template.showOnCanvas} onChange={(value) => updateTemplate({ ...template, showOnCanvas: value })} />
           <Field label="2D 시트 크기"><Range value={template.canvasScalePercent} min={50} max={200} step={5} suffix="%" onChange={(value) => updateTemplate({ ...template, canvasScalePercent: value })} /></Field>
+          <Field label="폼보드 겹침"><NumberInput value={template.formboardOverlapMm} suffix="mm" min={0} onChange={(value) => updateTemplate({ ...template, formboardOverlapMm: Math.min(50, value) })} /></Field>
+          <Field label="폼보드 교정선"><NumberInput value={template.formboardCalibrationLengthMm} suffix="mm" min={10} onChange={(value) => updateTemplate({ ...template, formboardCalibrationLengthMm: Math.min(200, value) })} /></Field>
+          <Toggle label="폼보드 커넥터 표" description="1:1 타일 도면에 커넥터별 핀 수와 부품번호 표를 표시합니다." checked={template.formboardConnectorTables} onChange={(value) => updateTemplate({ ...template, formboardConnectorTables: value })} />
           <Field label="파일명 규칙"><input value={template.fileNamePattern} onChange={(event) => updateTemplate({ ...template, fileNamePattern: event.target.value })} /></Field>
           <div className="settings-actions"><button onClick={() => void chooseLogo()}>{template.logoDataUrl ? "로고 교체" : "로고 이미지 선택"}</button>{template.logoDataUrl && <button onClick={() => updateTemplate({ ...template, logoDataUrl: "" })}>로고 제거</button>}</div>
           <h4>출력 작업</h4><ProfileBar value={outputJob.id} items={draft.outputJobs} onSelect={(id) => setPreference("activeOutputJobId", id)} onClone={() => { const item = cloneNamed(outputJob); setPreference("outputJobs", [...draft.outputJobs, item]); setPreference("activeOutputJobId", item.id); }} onDelete={draft.outputJobs.length > 1 ? () => { const items = draft.outputJobs.filter((item) => item.id !== outputJob.id); setPreference("outputJobs", items); setPreference("activeOutputJobId", items[0].id); } : undefined} />
@@ -183,6 +204,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <Field label="자동 저장 간격"><select value={draft.autosaveIntervalMinutes} onChange={(event) => setPreference("autosaveIntervalMinutes", Number(event.target.value))}><option value="0">사용 안 함</option><option value="1">1분</option><option value="5">5분</option><option value="10">10분</option><option value="30">30분</option></select></Field>
           <Field label="프로젝트별 복구본"><NumberInput value={draft.recoveryRetention} suffix="개" min={1} onChange={(value) => setPreference("recoveryRetention", value)} /></Field>
           <div className="settings-note"><strong>복구 방식</strong><span>변경된 프로젝트만 앱 데이터 폴더에 .harness 복구본으로 저장합니다. 다음 실행 시 복구본을 새 창으로 열 수 있습니다.</span></div>
+          <div className="settings-note"><strong>마지막 오류 보고서</strong><span>{lastCrashReport || "기록된 앱 오류가 없습니다."}</span>{lastCrashReport && <div className="settings-actions"><button onClick={() => void navigator.clipboard.writeText(lastCrashReport)}>복사</button><button onClick={() => { window.localStorage.removeItem("hd.lastCrashReport"); setLastCrashReport(""); }}>삭제</button></div>}</div>
         </SettingsGroup>}
         {section === "quality" && <SettingsGroup title="3D 및 STEP 가져오기" description="복잡한 하우징과 대형 하네스의 품질과 성능 균형을 지정합니다.">
           <Field label="3D 렌더링 품질"><select value={draft.threeDQuality} onChange={(event) => setPreference("threeDQuality", event.target.value as AppPreferences["threeDQuality"])}><option value="low">낮음 · 대형 프로젝트</option><option value="medium">표준 · 권장</option><option value="high">높음 · 상세 확인</option></select></Field>
