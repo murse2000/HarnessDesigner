@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Boxes,
+  ExternalLink,
   FileBox,
   ImagePlus,
   Plus,
@@ -13,7 +14,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { partCategories as categories } from "../domain/partCategories";
-import { createModelPreview, createPhotoPreview } from "../domain/partPreview";
+import {
+  createDrawingPreview,
+  createModelPreview,
+  createPhotoPreview,
+  getPartDrawingPreview,
+  getPartPhotoPreview,
+} from "../domain/partPreview";
 import {
   defaultCableCores,
   getCableCores,
@@ -34,6 +41,7 @@ import type {
   PartSnapshot,
   PinDefinition,
   QuantityUnit,
+  SymbolAsset,
 } from "../domain/types";
 import { backendInvoke, isTauri } from "../platform";
 import { loadAppPreferences } from "../preferences";
@@ -149,6 +157,9 @@ export function PartRegistrationDialog({
   const [photoPreview, setPhotoPreview] = useState<PartPreview | null>(
     editingPart?.preview?.kind === "photo" ? editingPart.preview : null,
   );
+  const [drawingPreview, setDrawingPreview] = useState<PartPreview | null>(
+    getPartDrawingPreview(editingPart) ?? null,
+  );
   const [previewChanged, setPreviewChanged] = useState(false);
   const [modelChanged, setModelChanged] = useState(false);
   const [modelPlacement, setModelPlacement] = useState<ModelPlacement>(() =>
@@ -158,6 +169,9 @@ export function PartRegistrationDialog({
     editingPart?.modelAssetId ? "등록된 STEP 모델 불러오는 중…" : null,
   );
   const [photoState, setPhotoState] = useState<string | null>(null);
+  const [drawingState, setDrawingState] = useState<string | null>(
+    editingPart?.symbolAssetId ? "등록된 2D 도면 불러오는 중…" : null,
+  );
   const [activeDropZone, setActiveDropZone] =
     useState<AssetDropZone | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +214,32 @@ export function PartRegistrationDialog({
       .catch((reason) => {
         setModelState(null);
         setError(`등록된 STEP 모델을 불러오지 못했습니다: ${String(reason)}`);
+      });
+  }, [editingPart, snapshot]);
+
+  useEffect(() => {
+    if (!editingPart?.symbolAssetId) return;
+    const projectAsset = snapshot?.project.assets.find(
+      (asset) => asset.id === editingPart.symbolAssetId,
+    );
+    if (projectAsset) {
+      setDrawingPreview(createDrawingPreview(projectAsset));
+      setDrawingState(projectAsset.sourceName);
+      return;
+    }
+    if (!isTauri()) return;
+    void backendInvoke<SymbolAsset | null>("get_library_symbol_asset", {
+      assetId: editingPart.symbolAssetId,
+    })
+      .then((asset) => {
+        setDrawingPreview(asset ? createDrawingPreview(asset) : null);
+        setDrawingState(
+          asset ? asset.sourceName : "등록된 2D 도면을 찾지 못했습니다.",
+        );
+      })
+      .catch((reason) => {
+        setDrawingState(null);
+        setError(`등록된 2D 도면을 불러오지 못했습니다: ${String(reason)}`);
       });
   }, [editingPart, snapshot]);
 
@@ -255,6 +295,10 @@ export function PartRegistrationDialog({
       ),
     ];
   }, [libraryParts, snapshot]);
+
+  const displayedPhotoPreview =
+    photoPreview ?? getPartPhotoPreview(editingPart) ?? null;
+  const drawingUrl = editingPart?.attributes.drawingUrl;
 
   if (!snapshot) return null;
 
@@ -924,18 +968,20 @@ export function PartRegistrationDialog({
                   JPG/PNG/WebP 선택
                 </button>
               </div>
-              {photoPreview ? (
+              {displayedPhotoPreview ? (
                 <div>
-                  <img src={photoPreview.dataUrl} alt="대표 사진 미리보기" />
-                  <button
-                    title="대표 사진 제거"
-                    onClick={() => {
-                      setPhotoPreview(null);
-                      setPreviewChanged(true);
-                    }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  <img src={displayedPhotoPreview.dataUrl} alt="대표 사진 미리보기" />
+                  {photoPreview && (
+                    <button
+                      title="대표 사진 제거"
+                      onClick={() => {
+                        setPhotoPreview(null);
+                        setPreviewChanged(true);
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
               ) : (
                 <span>
@@ -944,7 +990,45 @@ export function PartRegistrationDialog({
                   사진이 있으면 3D와 도면보다 우선 표시됩니다.
                 </span>
               )}
-              {photoState && <small className="asset-drop-state">{photoState}</small>}
+              {(photoState ?? displayedPhotoPreview?.sourceName) && (
+                <small className="asset-drop-state">
+                  {photoState ?? displayedPhotoPreview?.sourceName}
+                </small>
+              )}
+            </div>
+            <div className="drawing-registration">
+              <div>
+                <h3>2D 도면</h3>
+                {drawingUrl && (
+                  <a href={drawingUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={11} />
+                    원본 열기
+                  </a>
+                )}
+              </div>
+              {drawingPreview ? (
+                <div>
+                  <img src={drawingPreview.dataUrl} alt="등록된 2D 도면 미리보기" />
+                </div>
+              ) : drawingUrl ? (
+                <a
+                  className="drawing-resource"
+                  href={drawingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <FileBox size={22} />
+                  <span>등록된 제조사 도면</span>
+                  <small>PDF 원본을 열어 확인할 수 있습니다.</small>
+                </a>
+              ) : (
+                <span>등록된 DXF/SVG 도면이 없습니다.</span>
+              )}
+              {(drawingState ?? drawingPreview?.sourceName) && (
+                <small className="asset-drop-state">
+                  {drawingState ?? drawingPreview?.sourceName}
+                </small>
+              )}
             </div>
             <div
               ref={modelDropRef}

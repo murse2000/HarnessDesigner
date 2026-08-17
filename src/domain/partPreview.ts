@@ -12,6 +12,20 @@ export function createDrawingPreview(asset: SymbolAsset): PartPreview {
   return { kind: "drawing", dataUrl: svgDataUrl(svg), sourceName: asset.sourceName };
 }
 
+export function getPartPhotoPreview(part: PartSnapshot | undefined): PartPreview | undefined {
+  if (part?.preview?.kind === "photo") return part.preview;
+  const dataUrl = part?.attributes.officialImageUrl;
+  return dataUrl ? { kind: "photo", dataUrl, sourceName: "제조사 공식 제품 이미지" } : undefined;
+}
+
+export function getPartDrawingPreview(
+  part: PartSnapshot | undefined,
+  asset?: SymbolAsset,
+): PartPreview | undefined {
+  if (asset) return createDrawingPreview(asset);
+  return part?.preview?.kind === "drawing" ? part.preview : undefined;
+}
+
 export function selectStoredPreview(part: PartSnapshot): PartPreview | undefined {
   if (part.preview?.kind === "photo") return part.preview;
   if (part.modelAssetId && part.preview?.kind === "model") return part.preview;

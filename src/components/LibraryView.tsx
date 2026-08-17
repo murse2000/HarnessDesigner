@@ -4,6 +4,10 @@ import { Boxes, Clipboard, FileInput, Filter, PackagePlus, Plug, Search, Sliders
 import { useEffect, useMemo, useState } from "react";
 import { getPartName, getPartPinCount } from "../domain/parts";
 import { partCategories, partCategoryLabel } from "../domain/partCategories";
+import {
+  libraryLoadPercent,
+  nextLibraryLoadCount,
+} from "../domain/libraryLoadProgress";
 import type { PartCategory, PartSnapshot } from "../domain/types";
 import type { CadImportResult } from "../import/cadImport";
 import { importCad } from "../import/cadImport";
@@ -28,18 +32,52 @@ export function LibraryView() {
   const [aligningPart, setAligningPart] = useState<PartSnapshot | null>(null);
   const [libraryParts, setLibraryParts] = useState<PartSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState({ completed: 0, total: 0 });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [libraryRevision, setLibraryRevision] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number; partId: string } | null>(null);
   const projectPartCount = snapshot?.project.parts.length ?? 0;
   useEffect(() => {
     if (!isTauri()) return;
+    let cancelled = false;
+    let frame = 0;
     setLoading(true);
+    setLibraryParts([]);
+    setLoadProgress({ completed: 0, total: 0 });
     setLoadError(null);
     void backendInvoke<PartSnapshot[]>("list_library_parts")
-      .then(setLibraryParts)
-      .catch((reason) => setLoadError(`공용 부품 라이브러리를 읽지 못했습니다: ${String(reason)}`))
-      .finally(() => setLoading(false));
+      .then((loadedParts) => {
+        if (cancelled) return;
+        setLoadProgress({ completed: 0, total: loadedParts.length });
+        if (!loadedParts.length) {
+          setLoading(false);
+          return;
+        }
+        let completed = 0;
+        const revealNextBatch = () => {
+          if (cancelled) return;
+          completed = nextLibraryLoadCount(completed, loadedParts.length);
+          setLibraryParts(loadedParts.slice(0, completed));
+          setLoadProgress({ completed, total: loadedParts.length });
+          if (completed < loadedParts.length) {
+            frame = requestAnimationFrame(revealNextBatch);
+          } else {
+            frame = requestAnimationFrame(() => {
+              if (!cancelled) setLoading(false);
+            });
+          }
+        };
+        frame = requestAnimationFrame(revealNextBatch);
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        setLoadError(`공용 부품 라이브러리를 읽지 못했습니다: ${String(reason)}`);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
   }, [cadResult, projectPartCount, libraryRevision]);
   useEffect(() => {
     if (!isTauri()) return;
@@ -53,6 +91,7 @@ export function LibraryView() {
       .filter((part) => `${getPartName(part)} ${part.partNumber} ${part.description} ${part.manufacturer}`.toLowerCase().includes(query.toLowerCase()));
   }, [category, libraryParts, query]);
   const categoryCounts = useMemo(() => new Map(partCategories.map((item) => [item, libraryParts.filter((part) => part.category === item).length])), [libraryParts]);
+  const progressPercent = libraryLoadPercent(loadProgress.completed, loadProgress.total);
   if (!snapshot) return null;
   const openCad = async () => {
     if (!isTauri()) return;
@@ -81,7 +120,13 @@ export function LibraryView() {
         {partCategories.map((item) => <button key={item} className={category === item ? "active" : ""} aria-pressed={category === item} onClick={() => setCategory(item)}><span>{partCategoryLabel(item, locale)}</span><code>{categoryCounts.get(item) ?? 0}</code></button>)}
       </nav>
     </div>
-    <div className="library-grid">{loading ? <div className="empty-state">공용 부품 목록을 불러오는 중…</div> : loadError ? <div className="empty-state">{loadError}</div> : parts.length ? parts.map((part) => <article key={part.id} title="더블 클릭하여 부품 데이터 수정" onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setEditingPart(part); }} onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, partId: part.id }); }}><PartThumbnail part={part} project={snapshot.project} /><div className="library-card-copy"><strong>{getPartName(part)}</strong><span>{part.manufacturer}</span><p><code>{part.partNumber}</code> · {part.description}</p></div><div className="library-card-actions"><em>{partCategoryLabel(part.category, locale)}{part.category === "housing" ? ` · ${getPartPinCount(part)}P` : ""}{part.modelAssetId ? " · 3D" : ""}</em><code>REV {part.revision}</code>{part.modelAssetId && <button onClick={() => setAligningPart(part)}><Sliders size={10} />3D 정렬</button>}</div></article>) : <div className="empty-state">{category === "all" ? "등록된 공용 부품이 없습니다." : `${partCategoryLabel(category, locale)} 카테고리에 표시할 부품이 없습니다.`}</div>}</div>
+    <div className="library-grid">
+      {loading && <div className="library-loading-status" role="status" aria-live="polite">
+        <div><strong>{loadProgress.total ? "부품 카드 준비 중" : "라이브러리 데이터 확인 중"}</strong><span>{loadProgress.total ? `${loadProgress.completed} / ${loadProgress.total} · ${progressPercent}%` : "SQLite 라이브러리를 읽고 있습니다."}</span></div>
+        <progress max={loadProgress.total || undefined} value={loadProgress.total ? loadProgress.completed : undefined} />
+      </div>}
+      {loadError ? <div className="empty-state">{loadError}</div> : parts.length ? parts.map((part) => <article key={part.id} title="더블 클릭하여 부품 데이터 수정" onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setEditingPart(part); }} onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, partId: part.id }); }}><PartThumbnail part={part} project={snapshot.project} /><div className="library-card-copy"><strong>{getPartName(part)}</strong><span>{part.manufacturer}</span><p><code>{part.partNumber}</code> · {part.description}</p></div><div className="library-card-actions"><em>{partCategoryLabel(part.category, locale)}{part.category === "housing" ? ` · ${getPartPinCount(part)}P` : ""}{part.modelAssetId ? " · 3D" : ""}</em><code>REV {part.revision}</code>{part.modelAssetId && <button onClick={() => setAligningPart(part)}><Sliders size={10} />3D 정렬</button>}</div></article>) : !loading && <div className="empty-state">{category === "all" ? "등록된 공용 부품이 없습니다." : `${partCategoryLabel(category, locale)} 카테고리에 표시할 부품이 없습니다.`}</div>}
+    </div>
     {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems()} onClose={() => setMenu(null)} />}
     {registeringPart && <PartRegistrationDialog onClose={() => setRegisteringPart(false)} onSaved={(saved) => setLibraryParts((current) => [...current.filter((part) => !saved.some((item) => item.id === part.id)), ...saved])} />}
     {editingPart && <PartRegistrationDialog part={editingPart} onClose={() => setEditingPart(null)} onSaved={(saved) => { setLibraryParts((current) => [...current.filter((part) => !saved.some((item) => item.id === part.id)), ...saved]); const updated = saved.find((part) => part.id === editingPart.id); if (updated) setEditingPart(updated); }} />}

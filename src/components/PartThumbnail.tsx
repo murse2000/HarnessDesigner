@@ -1,6 +1,6 @@
 import { Boxes, Cable, Circle, CircleDot, Component, GitFork, Layers3, Minus, Paperclip, Plug, Shield, Tag, Waves } from "lucide-react";
 import { useEffect, useState, type ComponentType } from "react";
-import { createDrawingPreview, createModelPreview, selectStoredPreview } from "../domain/partPreview";
+import { createDrawingPreview, createModelPreview, getPartPhotoPreview, selectStoredPreview } from "../domain/partPreview";
 import type { PartCategory, PartPreview, PartSnapshot, ProjectDocument, SymbolAsset, ModelAsset } from "../domain/types";
 import { backendInvoke, isTauri } from "../platform";
 
@@ -20,13 +20,8 @@ const categoryIcons: Record<PartCategory, ComponentType<{ size?: number }>> = {
   splice: GitFork,
 };
 
-function getOfficialImagePreview(part: PartSnapshot): PartPreview | undefined {
-  const dataUrl = part.attributes.officialImageUrl;
-  return dataUrl ? { kind: "photo", dataUrl, sourceName: "제조사 공식 제품 이미지" } : undefined;
-}
-
 export function PartThumbnail({ part, project, large = false }: { part: PartSnapshot; project?: ProjectDocument; large?: boolean }) {
-  const [preview, setPreview] = useState<PartPreview | undefined>(() => selectStoredPreview(part) ?? getOfficialImagePreview(part));
+  const [preview, setPreview] = useState<PartPreview | undefined>(() => selectStoredPreview(part) ?? getPartPhotoPreview(part));
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +30,7 @@ export function PartThumbnail({ part, project, large = false }: { part: PartSnap
       setPreview(stored);
       return;
     }
-    const officialImage = getOfficialImagePreview(part);
+    const officialImage = getPartPhotoPreview(part);
     if (officialImage) {
       setPreview(officialImage);
       return;
