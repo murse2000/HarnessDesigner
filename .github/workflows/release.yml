@@ -150,8 +150,13 @@ jobs:
         run: |
           mkdir -p release-assets
           cp "$(find src-tauri/gen/android/app/build/outputs -name '*.aab' -type f | head -1)" "release-assets/Harness-Designer_${APP_VERSION}_android-unsigned.aab"
+      - name: Free Android release build space
+        run: |
+          rm -rf src-tauri/target/aarch64-linux-android/release
+          rm -rf src-tauri/target/armv7-linux-androideabi/release
+          rm -rf src-tauri/target/x86_64-linux-android/release
       - name: Build installable Android debug APK
-        run: npm run tauri android build -- --ci --debug --apk --target aarch64 --target armv7 --target x86_64
+        run: npm run tauri android build -- --ci --debug --apk --target aarch64
       - name: Collect Android debug APK
         run: cp "$(find src-tauri/gen/android/app/build/outputs -name '*debug*.apk' -type f | head -1)" "release-assets/Harness-Designer_${APP_VERSION}_android-debug.apk"
       - uses: actions/upload-artifact@v4
