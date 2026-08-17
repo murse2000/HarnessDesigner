@@ -27,7 +27,7 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
     "resources": {
       "../node_modules/occt-import-js/LICENSE.md": "licenses/occt-import-js-LGPL-2.1.txt",
