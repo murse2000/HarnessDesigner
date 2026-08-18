@@ -28,7 +28,7 @@ pub fn library_path(app_data: &Path) -> Result<PathBuf, String> {
         .library_directory
         .map(PathBuf::from)
         .unwrap_or_else(|| app_data.to_path_buf())
-        .join("parts.db"))
+        .join("library.db"))
 }
 
 pub fn set_library_directory(app_data: &Path, directory: &Path) -> Result<PathBuf, String> {
@@ -43,7 +43,7 @@ pub fn set_library_directory(app_data: &Path, directory: &Path) -> Result<PathBu
             library_backup_retention: read(&path)?.library_backup_retention,
         },
     )?;
-    Ok(directory.join("parts.db"))
+    Ok(directory.join("library.db"))
 }
 
 pub fn library_backup_retention(app_data: &Path) -> Result<usize, String> {
@@ -100,7 +100,7 @@ mod tests {
         let app_data = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let selected = set_library_directory(app_data.path(), library.path()).unwrap();
-        assert_eq!(selected, library.path().join("parts.db"));
+        assert_eq!(selected, library.path().join("library.db"));
         assert_eq!(library_path(app_data.path()).unwrap(), selected);
     }
 }

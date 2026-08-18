@@ -35,6 +35,14 @@ describe("layoutHarnessNodes", () => {
     expect(segment.lengthMm).toBe(450);
   });
 
+  it("사용자가 지정한 3D 분기점 위치를 자동 배치보다 우선한다", () => {
+    const harness = structuredClone(sampleHarness);
+    expect(harness.nodes[1].kind).toBe("junction");
+    harness.nodes[1].threeDPosition = { x: 125, y: 45, z: -80 };
+
+    expect(layoutHarnessNodes(harness, 180).get(harness.nodes[1].id)).toEqual({ x: 125, y: 45, z: -80 });
+  });
+
   it("컴팩트 코일은 일반 구간 1회, 매우 긴 구간도 최대 3회만 감는다", () => {
     expect(getCompactCoilLayout(450, 180)?.turns).toBe(1);
     expect(getCompactCoilLayout(3000, 180)?.turns).toBe(2);

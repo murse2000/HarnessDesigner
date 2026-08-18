@@ -18,6 +18,11 @@ interface CableJacketEdgeData extends Record<string, unknown> {
   onRoutePreview: (segmentId: string, route: CableDrawingRoute) => void;
   onRouteCommit: (segmentId: string, route: CableDrawingRoute) => void;
   onRouteCancel: (segmentId: string) => void;
+  heatShrink?: {
+    source?: { partNumber: string; color: string };
+    target?: { partNumber: string; color: string };
+  };
+  coverings?: string[];
 }
 
 type CableJacketFlowEdge = Edge<CableJacketEdgeData, "cable-jacket">;
@@ -47,6 +52,8 @@ export function CableJacketEdge({ id, sourceX, sourceY, targetX, targetY, data, 
     borderRadius: 8,
   });
   const centerX = (geometry.sourceX + geometry.targetX) / 2;
+  const sourceHeatShrinkX = geometry.sourceX + direction * 7;
+  const targetHeatShrinkX = geometry.targetX - direction * 7;
   const hitSegmentStyle = (x1: number, y1: number, x2: number, y2: number): CSSProperties => x1 === x2 ? {
     left: x1 - 12,
     top: Math.min(y1, y2),
@@ -153,6 +160,8 @@ export function CableJacketEdge({ id, sourceX, sourceY, targetX, targetY, data, 
   };
   return <>
     <BaseEdge id={id} path={path} style={{ ...style, pointerEvents: "none" }} interactionWidth={0} />
+    {edgeData.heatShrink?.source && <g className="harness-cable-heat-shrink" aria-label={`시작 수축튜브 ${edgeData.heatShrink.source.partNumber}`}><rect x={sourceHeatShrinkX - 8} y={geometry.sourceY - 5} width={16} height={10} rx={2} fill={edgeData.heatShrink.source.color} /><title>{`START HEAT SHRINK · ${edgeData.heatShrink.source.partNumber}`}</title></g>}
+    {edgeData.heatShrink?.target && <g className="harness-cable-heat-shrink" aria-label={`끝 수축튜브 ${edgeData.heatShrink.target.partNumber}`}><rect x={targetHeatShrinkX - 8} y={geometry.targetY - 5} width={16} height={10} rx={2} fill={edgeData.heatShrink.target.color} /><title>{`END HEAT SHRINK · ${edgeData.heatShrink.target.partNumber}`}</title></g>}
     {!edgeData.locked && <circle className={`harness-cable-jacket-length-grip ${selected ? "is-selected" : ""}`} cx={geometry.sourceX} cy={geometry.sourceY} r={5} />}
     {!edgeData.locked && <circle className={`harness-cable-jacket-length-grip ${selected ? "is-selected" : ""}`} cx={geometry.targetX} cy={geometry.targetY} r={5} />}
     <EdgeLabelRenderer>
@@ -185,6 +194,9 @@ export function CableJacketEdge({ id, sourceX, sourceY, targetX, targetY, data, 
         onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (!edgeData.locked) edgeData.onEdit(id); }}
         onContextMenu={openContextMenu}
       >{label}</div>}
+      {edgeData.heatShrink?.source && <div className="harness-cable-accessory-label nodrag nopan" style={{ left: sourceHeatShrinkX, top: geometry.sourceY - 20 }}>{`HS · ${edgeData.heatShrink.source.partNumber}`}</div>}
+      {edgeData.heatShrink?.target && <div className="harness-cable-accessory-label nodrag nopan" style={{ left: targetHeatShrinkX, top: geometry.targetY - 20 }}>{`HS · ${edgeData.heatShrink.target.partNumber}`}</div>}
+      {!!edgeData.coverings?.length && <div className="harness-cable-covering-label nodrag nopan" style={{ left: labelX, top: labelY + 18 }}>{edgeData.coverings.join(" · ")}</div>}
     </EdgeLabelRenderer>
   </>;
 }

@@ -86,5 +86,8 @@ export function layoutHarnessNodes(harness: HarnessAssembly, maxSegmentDisplayLe
       }
     }
   }
+  for (const node of harness.nodes) {
+    if (node.threeDPosition) positions.set(node.id, { ...node.threeDPosition });
+  }
   return positions;
 }

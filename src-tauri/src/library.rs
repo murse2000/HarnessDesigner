@@ -2,386 +2,16 @@ use crate::model::{ModelAsset, PartSnapshot, SymbolAsset};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rusqlite::{params, Connection};
 use serde_json::Value;
-use std::path::Path;
+use std::{
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
+use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 const DEFAULT_PARTS_JSON: &str = include_str!("default_parts.json");
 const DEFAULT_MX150_PARTS_JSON: &str = include_str!("default_mx150_parts.json");
 const DEFAULT_JST_HIROSE_PARTS_JSON: &str = include_str!("default_jst_hirose_parts.json");
-
-const DEFAULT_MODEL_ASSETS: &[(&str, &str, &str, &[u8])] = &[
-    (
-        "builtin-model-hirose-df13-4s-125c",
-        "DF13-4S-1.25C",
-        "DF13-4S-1.25C.stp",
-        include_bytes!("../assets/parts/hirose/DF13-4S-1.25C.stp"),
-    ),
-    (
-        "builtin-model-hirose-df62c-4s-22c",
-        "DF62C-4S-2.2C",
-        "DF62C-4S-2.2C.stp",
-        include_bytes!("../assets/parts/hirose/DF62C-4S-2.2C.stp"),
-    ),
-    (
-        "builtin-model-hirose-df11-6ds-2c",
-        "DF11-6DS-2C",
-        "DF11-6DS-2C.stp",
-        include_bytes!("../assets/parts/hirose/DF11-6DS-2C.stp"),
-    ),
-    (
-        "builtin-model-hirose-gt17h-4s-2c",
-        "GT17H-4S-2C",
-        "GT17HS2-4S-ASSY.stp",
-        include_bytes!("../assets/parts/hirose/GT17HS2-4S-ASSY.stp"),
-    ),
-    (
-        "builtin-model-molex-334720601",
-        "334720601",
-        "334720601.stp",
-        include_bytes!("../assets/parts/molex/334720601.stp"),
-    ),
-    (
-        "builtin-model-molex-334721201",
-        "334721201",
-        "334721201.stp",
-        include_bytes!("../assets/parts/molex/334721201.stp"),
-    ),
-    (
-        "builtin-model-molex-334721601",
-        "334721601",
-        "334721601.stp",
-        include_bytes!("../assets/parts/molex/334721601.stp"),
-    ),
-    (
-        "builtin-model-molex-334822101",
-        "334822101",
-        "334822101.stp",
-        include_bytes!("../assets/parts/molex/334822101.stp"),
-    ),
-    (
-        "builtin-model-molex-334823601",
-        "334823601",
-        "334823601.stp",
-        include_bytes!("../assets/parts/molex/334823601.stp"),
-    ),
-    (
-        "builtin-model-molex-334824801",
-        "334824801",
-        "334824801.stp",
-        include_bytes!("../assets/parts/molex/334824801.stp"),
-    ),
-    (
-        "builtin-model-molex-334826201",
-        "334826201",
-        "334826201.stp",
-        include_bytes!("../assets/parts/molex/334826201.stp"),
-    ),
-    (
-        "builtin-model-molex-334828601",
-        "334828601",
-        "334828601.stp",
-        include_bytes!("../assets/parts/molex/334828601.stp"),
-    ),
-    (
-        "builtin-model-molex-349500610",
-        "349500610",
-        "349500610.stp",
-        include_bytes!("../assets/parts/molex/349500610.stp"),
-    ),
-    (
-        "builtin-model-molex-349500620",
-        "349500620",
-        "349500620.stp",
-        include_bytes!("../assets/parts/molex/349500620.stp"),
-    ),
-    (
-        "builtin-model-molex-349500811",
-        "349500811",
-        "349500811.stp",
-        include_bytes!("../assets/parts/molex/349500811.stp"),
-    ),
-    (
-        "builtin-model-molex-349500821",
-        "349500821",
-        "349500821.stp",
-        include_bytes!("../assets/parts/molex/349500821.stp"),
-    ),
-    (
-        "builtin-model-molex-349501210",
-        "349501210",
-        "349501210.stp",
-        include_bytes!("../assets/parts/molex/349501210.stp"),
-    ),
-    (
-        "builtin-model-molex-349501220",
-        "349501220",
-        "349501220.stp",
-        include_bytes!("../assets/parts/molex/349501220.stp"),
-    ),
-    (
-        "builtin-model-molex-349501611",
-        "349501611",
-        "349501611.stp",
-        include_bytes!("../assets/parts/molex/349501611.stp"),
-    ),
-    (
-        "builtin-model-molex-349501621",
-        "349501621",
-        "349501621.stp",
-        include_bytes!("../assets/parts/molex/349501621.stp"),
-    ),
-    (
-        "builtin-model-molex-349502011",
-        "349502011",
-        "349502011.stp",
-        include_bytes!("../assets/parts/molex/349502011.stp"),
-    ),
-    (
-        "builtin-model-molex-349502021",
-        "349502021",
-        "349502021.stp",
-        include_bytes!("../assets/parts/molex/349502021.stp"),
-    ),
-    (
-        "builtin-model-molex-349510610",
-        "349510610",
-        "349510610.stp",
-        include_bytes!("../assets/parts/molex/349510610.stp"),
-    ),
-    (
-        "builtin-model-molex-349510620",
-        "349510620",
-        "349510620.stp",
-        include_bytes!("../assets/parts/molex/349510620.stp"),
-    ),
-    (
-        "builtin-model-molex-349510811",
-        "349510811",
-        "349510811.stp",
-        include_bytes!("../assets/parts/molex/349510811.stp"),
-    ),
-    (
-        "builtin-model-molex-349510821",
-        "349510821",
-        "349510821.stp",
-        include_bytes!("../assets/parts/molex/349510821.stp"),
-    ),
-    (
-        "builtin-model-molex-349510831",
-        "349510831",
-        "349510831.stp",
-        include_bytes!("../assets/parts/molex/349510831.stp"),
-    ),
-    (
-        "builtin-model-molex-349510841",
-        "349510841",
-        "349510841.stp",
-        include_bytes!("../assets/parts/molex/349510841.stp"),
-    ),
-    (
-        "builtin-model-molex-349511210",
-        "349511210",
-        "349511210.stp",
-        include_bytes!("../assets/parts/molex/349511210.stp"),
-    ),
-    (
-        "builtin-model-molex-349511220",
-        "349511220",
-        "349511220.stp",
-        include_bytes!("../assets/parts/molex/349511220.stp"),
-    ),
-    (
-        "builtin-model-molex-349511611",
-        "349511611",
-        "349511611.stp",
-        include_bytes!("../assets/parts/molex/349511611.stp"),
-    ),
-    (
-        "builtin-model-molex-349511621",
-        "349511621",
-        "349511621.stp",
-        include_bytes!("../assets/parts/molex/349511621.stp"),
-    ),
-    (
-        "builtin-model-molex-349511631",
-        "349511631",
-        "349511631.stp",
-        include_bytes!("../assets/parts/molex/349511631.stp"),
-    ),
-    (
-        "builtin-model-molex-349511641",
-        "349511641",
-        "349511641.stp",
-        include_bytes!("../assets/parts/molex/349511641.stp"),
-    ),
-    (
-        "builtin-model-molex-349512011",
-        "349512011",
-        "349512011.stp",
-        include_bytes!("../assets/parts/molex/349512011.stp"),
-    ),
-    (
-        "builtin-model-molex-349512021",
-        "349512021",
-        "349512021.stp",
-        include_bytes!("../assets/parts/molex/349512021.stp"),
-    ),
-    (
-        "builtin-model-molex-430250200",
-        "430250200",
-        "430250200.stp",
-        include_bytes!("../assets/parts/molex/430250200.stp"),
-    ),
-    (
-        "builtin-model-molex-430250400",
-        "430250400",
-        "430250400.stp",
-        include_bytes!("../assets/parts/molex/430250400.stp"),
-    ),
-    (
-        "builtin-model-molex-430250600",
-        "430250600",
-        "430250600.stp",
-        include_bytes!("../assets/parts/molex/430250600.stp"),
-    ),
-    (
-        "builtin-model-molex-430250800",
-        "430250800",
-        "430250800.stp",
-        include_bytes!("../assets/parts/molex/430250800.stp"),
-    ),
-    (
-        "builtin-model-molex-430251000",
-        "430251000",
-        "430251000.stp",
-        include_bytes!("../assets/parts/molex/430251000.stp"),
-    ),
-    (
-        "builtin-model-molex-430251200",
-        "430251200",
-        "430251200.stp",
-        include_bytes!("../assets/parts/molex/430251200.stp"),
-    ),
-    (
-        "builtin-model-molex-430251400",
-        "430251400",
-        "430251400.stp",
-        include_bytes!("../assets/parts/molex/430251400.stp"),
-    ),
-    (
-        "builtin-model-molex-430251600",
-        "430251600",
-        "430251600.stp",
-        include_bytes!("../assets/parts/molex/430251600.stp"),
-    ),
-    (
-        "builtin-model-molex-430251800",
-        "430251800",
-        "430251800.stp",
-        include_bytes!("../assets/parts/molex/430251800.stp"),
-    ),
-    (
-        "builtin-model-molex-430252000",
-        "430252000",
-        "430252000.stp",
-        include_bytes!("../assets/parts/molex/430252000.stp"),
-    ),
-    (
-        "builtin-model-molex-430252200",
-        "430252200",
-        "430252200.stp",
-        include_bytes!("../assets/parts/molex/430252200.stp"),
-    ),
-    (
-        "builtin-model-molex-430252400",
-        "430252400",
-        "430252400.stp",
-        include_bytes!("../assets/parts/molex/430252400.stp"),
-    ),
-    (
-        "builtin-model-molex-510210200",
-        "510210200",
-        "510210200.stp",
-        include_bytes!("../assets/parts/molex/510210200.stp"),
-    ),
-    (
-        "builtin-model-molex-510210300",
-        "510210300",
-        "510210300.stp",
-        include_bytes!("../assets/parts/molex/510210300.stp"),
-    ),
-    (
-        "builtin-model-molex-510210400",
-        "510210400",
-        "510210400.stp",
-        include_bytes!("../assets/parts/molex/510210400.stp"),
-    ),
-    (
-        "builtin-model-molex-510210500",
-        "510210500",
-        "510210500.stp",
-        include_bytes!("../assets/parts/molex/510210500.stp"),
-    ),
-    (
-        "builtin-model-molex-510210600",
-        "510210600",
-        "510210600.stp",
-        include_bytes!("../assets/parts/molex/510210600.stp"),
-    ),
-    (
-        "builtin-model-molex-510210700",
-        "510210700",
-        "510210700.stp",
-        include_bytes!("../assets/parts/molex/510210700.stp"),
-    ),
-    (
-        "builtin-model-molex-510210800",
-        "510210800",
-        "510210800.stp",
-        include_bytes!("../assets/parts/molex/510210800.stp"),
-    ),
-    (
-        "builtin-model-molex-510210900",
-        "510210900",
-        "510210900.stp",
-        include_bytes!("../assets/parts/molex/510210900.stp"),
-    ),
-    (
-        "builtin-model-molex-510211000",
-        "510211000",
-        "510211000.stp",
-        include_bytes!("../assets/parts/molex/510211000.stp"),
-    ),
-    (
-        "builtin-model-molex-510211100",
-        "510211100",
-        "510211100.stp",
-        include_bytes!("../assets/parts/molex/510211100.stp"),
-    ),
-    (
-        "builtin-model-molex-510211200",
-        "510211200",
-        "510211200.stp",
-        include_bytes!("../assets/parts/molex/510211200.stp"),
-    ),
-    (
-        "builtin-model-molex-510211300",
-        "510211300",
-        "510211300.stp",
-        include_bytes!("../assets/parts/molex/510211300.stp"),
-    ),
-    (
-        "builtin-model-molex-510211400",
-        "510211400",
-        "510211400.stp",
-        include_bytes!("../assets/parts/molex/510211400.stp"),
-    ),
-    (
-        "builtin-model-molex-510211500",
-        "510211500",
-        "510211500.stp",
-        include_bytes!("../assets/parts/molex/510211500.stp"),
-    ),
-];
 
 fn default_parts() -> Result<Vec<PartSnapshot>, String> {
     let mut parts: Vec<PartSnapshot> =
@@ -397,21 +27,91 @@ fn default_parts() -> Result<Vec<PartSnapshot>, String> {
     Ok(parts)
 }
 
+fn builtin_model_relative_path(asset_id: &str) -> Option<PathBuf> {
+    if let Some(part_number) = asset_id.strip_prefix("builtin-model-molex-") {
+        return Some(PathBuf::from("molex").join(format!("{part_number}.stp")));
+    }
+    let file_name = match asset_id {
+        "builtin-model-hirose-df13-4s-125c" => "DF13-4S-1.25C.stp",
+        "builtin-model-hirose-df62c-4s-22c" => "DF62C-4S-2.2C.stp",
+        "builtin-model-hirose-df11-6ds-2c" => "DF11-6DS-2C.stp",
+        "builtin-model-hirose-gt17h-4s-2c" => "GT17HS2-4S-ASSY.stp",
+        _ => return None,
+    };
+    Some(PathBuf::from("hirose").join(file_name))
+}
+
+pub fn seed_builtin_model_assets(path: &Path, resource_root: &Path) -> Result<usize, String> {
+    initialize(path)?;
+    let connection = Connection::open(path).map_err(|error| error.to_string())?;
+    let mut changed = 0;
+    for part in default_parts()? {
+        let Some(asset_id) = part.model_asset_id.as_deref() else {
+            continue;
+        };
+        let exists = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM model_assets WHERE id = ?1)",
+                [asset_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if exists {
+            continue;
+        }
+        let Some(relative_path) = builtin_model_relative_path(asset_id) else {
+            continue;
+        };
+        let source = resource_root.join(&relative_path);
+        if !source.is_file() {
+            continue;
+        }
+        let source_name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "기본 STEP 파일명이 올바르지 않습니다.".to_string())?;
+        let asset = ModelAsset {
+            id: asset_id.into(),
+            name: part.part_number,
+            source_format: "step".into(),
+            source_name: source_name.into(),
+            source_data_base64: BASE64.encode(
+                fs::read(&source)
+                    .map_err(|error| format!("기본 STEP 파일을 읽을 수 없습니다: {error}"))?,
+            ),
+            meshes: Vec::new(),
+        };
+        upsert_model_asset(path, &asset)?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryIntegrity {
     pub ok: bool,
     pub message: String,
     pub part_count: usize,
+    pub asset_count: usize,
+    pub missing_asset_count: usize,
     pub backup_count: usize,
 }
 
 pub fn initialize(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent.join("assets/models")).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent.join("assets/drawings")).map_err(|error| error.to_string())?;
     }
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    connection.execute_batch("CREATE TABLE IF NOT EXISTS parts (id TEXT PRIMARY KEY, part_number TEXT NOT NULL, category TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS model_assets (id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS symbol_assets (id TEXT PRIMARY KEY, json TEXT NOT NULL);").map_err(|error| error.to_string())
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS library_info (schema_version INTEGER NOT NULL);\
+         INSERT INTO library_info (schema_version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM library_info);\
+         CREATE TABLE IF NOT EXISTS parts (id TEXT PRIMARY KEY, part_number TEXT NOT NULL, category TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, json TEXT NOT NULL);\
+         CREATE INDEX IF NOT EXISTS parts_category_number ON parts(category, part_number);\
+         CREATE TABLE IF NOT EXISTS model_assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_format TEXT NOT NULL, source_name TEXT NOT NULL, source_path TEXT NOT NULL, mesh_path TEXT NOT NULL);\
+         CREATE TABLE IF NOT EXISTS symbol_assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_format TEXT NOT NULL, source_name TEXT NOT NULL, view_box TEXT NOT NULL, source_path TEXT NOT NULL);",
+    ).map_err(|error| error.to_string())
 }
 
 pub fn create_rotating_backup(path: &Path, retention: usize) -> Result<(), String> {
@@ -422,27 +122,22 @@ pub fn create_rotating_backup(path: &Path, retention: usize) -> Result<(), Strin
         .parent()
         .unwrap_or(Path::new("."))
         .join("library-backups");
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::fs::copy(path, directory.join(format!("parts-{nanos}.db")))
+    fs::copy(path, directory.join(format!("library-{nanos}.db")))
         .map_err(|error| format!("라이브러리 자동 백업에 실패했습니다: {error}"))?;
-    let mut backups = std::fs::read_dir(&directory)
+    let mut backups = fs::read_dir(&directory)
         .map_err(|error| error.to_string())?
         .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "db")
-        })
+        .filter(is_library_backup)
         .collect::<Vec<_>>();
     backups.sort_by_key(|entry| entry.file_name());
     let remove_count = backups.len().saturating_sub(retention);
     for entry in backups.into_iter().take(remove_count) {
-        std::fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+        fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -456,6 +151,19 @@ pub fn check_integrity(path: &Path) -> Result<LibraryIntegrity, String> {
     let part_count: usize = connection
         .query_row("SELECT COUNT(*) FROM parts", [], |row| row.get(0))
         .map_err(|error| error.to_string())?;
+    let model_paths = query_asset_paths(
+        &connection,
+        "SELECT source_path, mesh_path FROM model_assets",
+    )?;
+    let symbol_paths = query_asset_paths(&connection, "SELECT source_path, '' FROM symbol_assets")?;
+    let asset_count = model_paths.len() * 2 + symbol_paths.len();
+    let directory = library_directory(path);
+    let missing_asset_count = model_paths
+        .into_iter()
+        .flat_map(|(source, secondary)| [source, secondary])
+        .chain(symbol_paths.into_iter().map(|(source, _)| source))
+        .filter(|relative| !relative.is_empty() && !directory.join(relative).is_file())
+        .count();
     let backup_count = path
         .parent()
         .unwrap_or(Path::new("."))
@@ -464,21 +172,41 @@ pub fn check_integrity(path: &Path) -> Result<LibraryIntegrity, String> {
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
-                .filter(|entry| {
-                    entry
-                        .path()
-                        .extension()
-                        .is_some_and(|extension| extension == "db")
-                })
+                .filter(is_library_backup)
                 .count()
         })
         .unwrap_or(0);
     Ok(LibraryIntegrity {
-        ok: result == "ok",
-        message: result,
+        ok: result == "ok" && missing_asset_count == 0,
+        message: if missing_asset_count == 0 {
+            result
+        } else {
+            format!("누락된 외부 자산 {missing_asset_count}개")
+        },
         part_count,
+        asset_count,
+        missing_asset_count,
         backup_count,
     })
+}
+
+fn is_library_backup(entry: &fs::DirEntry) -> bool {
+    entry.file_name().to_string_lossy().starts_with("library-")
+        && entry
+            .path()
+            .extension()
+            .is_some_and(|extension| extension == "db")
+}
+
+fn query_asset_paths(connection: &Connection, sql: &str) -> Result<Vec<(String, String)>, String> {
+    let mut statement = connection.prepare(sql).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 pub fn list(path: &Path) -> Result<Vec<PartSnapshot>, String> {
@@ -501,9 +229,30 @@ pub fn list(path: &Path) -> Result<Vec<PartSnapshot>, String> {
 pub fn seed_default_parts(path: &Path) -> Result<usize, String> {
     let parts = default_parts()?;
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    seed_default_model_assets(&connection)?;
     let mut changed = 0;
-    for part in parts {
+    for mut part in parts {
+        if part.model_asset_id.as_ref().is_some_and(|asset_id| {
+            !connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM model_assets WHERE id = ?1)",
+                    [asset_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap_or(false)
+        }) {
+            part.model_asset_id = None;
+        }
+        if part.symbol_asset_id.as_ref().is_some_and(|asset_id| {
+            !connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM symbol_assets WHERE id = ?1)",
+                    [asset_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap_or(false)
+        }) {
+            part.symbol_asset_id = None;
+        }
         let mut value = serde_json::to_value(&part).map_err(|error| error.to_string())?;
         sort_json_keys(&mut value);
         let json = serde_json::to_string(&value).map_err(|error| error.to_string())?;
@@ -513,27 +262,6 @@ pub fn seed_default_parts(path: &Path) -> Result<usize, String> {
         ).map_err(|error| error.to_string())?;
     }
     Ok(changed)
-}
-
-fn seed_default_model_assets(connection: &Connection) -> Result<(), String> {
-    for (id, name, source_name, bytes) in DEFAULT_MODEL_ASSETS {
-        let asset = ModelAsset {
-            id: (*id).into(),
-            name: (*name).into(),
-            source_format: "step".into(),
-            source_name: (*source_name).into(),
-            source_data_base64: BASE64.encode(bytes),
-            meshes: Vec::new(),
-        };
-        let json = serde_json::to_string(&asset).map_err(|error| error.to_string())?;
-        connection
-            .execute(
-                "INSERT OR IGNORE INTO model_assets (id, json) VALUES (?1, ?2)",
-                params![asset.id, json],
-            )
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 fn sort_json_keys(value: &mut Value) {
@@ -568,13 +296,36 @@ pub fn upsert(path: &Path, part: &PartSnapshot) -> Result<(), String> {
 pub fn get_model_asset(path: &Path, id: &str) -> Result<Option<ModelAsset>, String> {
     initialize(path)?;
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    let result = connection.query_row("SELECT json FROM model_assets WHERE id = ?1", [id], |row| {
-        row.get::<_, String>(0)
-    });
+    let result = connection.query_row(
+        "SELECT name, source_format, source_name, source_path, mesh_path FROM model_assets WHERE id = ?1",
+        [id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?)),
+    );
     match result {
-        Ok(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|error| error.to_string()),
+        Ok((name, source_format, source_name, source_path, mesh_path)) => {
+            let directory = library_directory(path);
+            let source = fs::read(resolve_asset_path(
+                directory,
+                &source_path,
+                "assets/models",
+            )?)
+            .map_err(|error| format!("3D 원본 파일을 읽을 수 없습니다: {error}"))?;
+            let meshes =
+                fs::read_to_string(resolve_asset_path(directory, &mesh_path, "assets/models")?)
+                    .ok()
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|error| format!("3D 메시 파일이 손상되었습니다: {error}"))?
+                    .unwrap_or_default();
+            Ok(Some(ModelAsset {
+                id: id.into(),
+                name,
+                source_format,
+                source_name,
+                source_data_base64: BASE64.encode(source),
+                meshes,
+            }))
+        }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
@@ -582,24 +333,55 @@ pub fn get_model_asset(path: &Path, id: &str) -> Result<Option<ModelAsset>, Stri
 
 pub fn upsert_model_asset(path: &Path, asset: &ModelAsset) -> Result<(), String> {
     initialize(path)?;
+    let safe_id = safe_asset_name(&asset.id)?;
+    let source_path = format!("assets/models/{safe_id}.step");
+    let mesh_path = format!("assets/models/{safe_id}.mesh.json");
+    let directory = library_directory(path);
+    if !asset.source_data_base64.is_empty() {
+        let source = BASE64
+            .decode(&asset.source_data_base64)
+            .map_err(|error| format!("3D 원본 데이터가 손상되었습니다: {error}"))?;
+        write_atomic(&directory.join(&source_path), &source)?;
+    } else if !directory.join(&source_path).exists() {
+        return Err("저장할 STEP 원본 데이터가 없습니다.".into());
+    }
+    if !asset.meshes.is_empty() || !directory.join(&mesh_path).exists() {
+        write_atomic(
+            &directory.join(&mesh_path),
+            &serde_json::to_vec(&asset.meshes).map_err(|error| error.to_string())?,
+        )?;
+    }
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    let json = serde_json::to_string(asset).map_err(|error| error.to_string())?;
-    connection.execute("INSERT INTO model_assets (id, json) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET json=excluded.json", params![asset.id, json]).map_err(|error| error.to_string())?;
+    connection.execute(
+        "INSERT INTO model_assets (id, name, source_format, source_name, source_path, mesh_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name, source_format=excluded.source_format, source_name=excluded.source_name, source_path=excluded.source_path, mesh_path=excluded.mesh_path",
+        params![asset.id, asset.name, asset.source_format, asset.source_name, source_path, mesh_path],
+    ).map_err(|error| error.to_string())?;
     Ok(())
 }
 
 pub fn get_symbol_asset(path: &Path, id: &str) -> Result<Option<SymbolAsset>, String> {
     initialize(path)?;
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    let result = connection.query_row(
-        "SELECT json FROM symbol_assets WHERE id = ?1",
-        [id],
-        |row| row.get::<_, String>(0),
-    );
+    let result = connection.query_row("SELECT name, source_format, source_name, view_box, source_path FROM symbol_assets WHERE id = ?1", [id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?))
+    });
     match result {
-        Ok(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|error| error.to_string()),
+        Ok((name, source_format, source_name, view_box, source_path)) => {
+            let svg = fs::read_to_string(resolve_asset_path(
+                library_directory(path),
+                &source_path,
+                "assets/drawings",
+            )?)
+            .map_err(|error| format!("2D 도면 파일을 읽을 수 없습니다: {error}"))?;
+            Ok(Some(SymbolAsset {
+                id: id.into(),
+                name,
+                source_format,
+                source_name,
+                view_box,
+                svg,
+            }))
+        }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
@@ -607,9 +389,269 @@ pub fn get_symbol_asset(path: &Path, id: &str) -> Result<Option<SymbolAsset>, St
 
 pub fn upsert_symbol_asset(path: &Path, asset: &SymbolAsset) -> Result<(), String> {
     initialize(path)?;
+    let safe_id = safe_asset_name(&asset.id)?;
+    let source_path = format!("assets/drawings/{safe_id}.svg");
+    write_atomic(
+        &library_directory(path).join(&source_path),
+        asset.svg.as_bytes(),
+    )?;
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    let json = serde_json::to_string(asset).map_err(|error| error.to_string())?;
-    connection.execute("INSERT INTO symbol_assets (id, json) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET json=excluded.json", params![asset.id, json]).map_err(|error| error.to_string())?;
+    connection.execute(
+        "INSERT INTO symbol_assets (id, name, source_format, source_name, view_box, source_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name=excluded.name, source_format=excluded.source_format, source_name=excluded.source_name, view_box=excluded.view_box, source_path=excluded.source_path",
+        params![asset.id, asset.name, asset.source_format, asset.source_name, asset.view_box, source_path],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn library_directory(path: &Path) -> &Path {
+    path.parent().unwrap_or(Path::new("."))
+}
+
+fn safe_asset_name(id: &str) -> Result<String, String> {
+    let safe = id
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .collect::<String>();
+    if safe.is_empty() {
+        Err("자산 ID가 올바르지 않습니다.".into())
+    } else {
+        Ok(safe)
+    }
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("asset")
+    ));
+    fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+    let backup = path.with_extension(format!(
+        "{}.backup",
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("asset")
+    ));
+    if path.exists() {
+        let _ = fs::remove_file(&backup);
+        fs::rename(path, &backup).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = fs::rename(&temporary, path) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+        return Err(error.to_string());
+    }
+    if backup.exists() {
+        let _ = fs::remove_file(backup);
+    }
+    Ok(())
+}
+
+fn resolve_asset_path(
+    directory: &Path,
+    relative: &str,
+    expected_root: &str,
+) -> Result<PathBuf, String> {
+    let relative = Path::new(relative);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || !relative.starts_with(expected_root)
+    {
+        return Err("라이브러리 자산 경로가 올바르지 않습니다.".into());
+    }
+    Ok(directory.join(relative))
+}
+
+pub fn copy_package(source_database: &Path, target_database: &Path) -> Result<(), String> {
+    initialize(source_database)?;
+    if let Some(parent) = target_database.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::copy(source_database, target_database)
+        .map_err(|error| format!("라이브러리 메타데이터를 복사할 수 없습니다: {error}"))?;
+    let source_assets = library_directory(source_database).join("assets");
+    let target_assets = library_directory(target_database).join("assets");
+    if source_assets.exists() {
+        copy_directory(&source_assets, &target_assets)?;
+    }
+    Ok(())
+}
+
+pub fn export_package(database: &Path, target: &Path) -> Result<(), String> {
+    initialize(database)?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = target.with_extension("hlib.tmp");
+    let file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("manifest.json", options)
+        .map_err(|error| error.to_string())?;
+    zip.write_all(br#"{"format":"harness-designer-library","schemaVersion":1}"#)
+        .map_err(|error| error.to_string())?;
+    add_file_to_package(&mut zip, database, "library.db", options)?;
+    let assets = library_directory(database).join("assets");
+    if assets.exists() {
+        add_directory_to_package(&mut zip, &assets, Path::new("assets"), options)?;
+    }
+    zip.finish().map_err(|error| error.to_string())?;
+    if target.exists() {
+        fs::remove_file(target).map_err(|error| error.to_string())?;
+    }
+    fs::rename(temporary, target).map_err(|error| error.to_string())
+}
+
+pub fn import_package(source: &Path, target_database: &Path) -> Result<(), String> {
+    let file = fs::File::open(source)
+        .map_err(|error| format!("라이브러리 패키지를 열 수 없습니다: {error}"))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|error| format!("올바른 .hlib 패키지가 아닙니다: {error}"))?;
+    let parent = library_directory(target_database);
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = parent.join(".library-importing");
+    if temporary.exists() {
+        fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let enclosed = entry
+            .enclosed_name()
+            .ok_or_else(|| "라이브러리 패키지에 안전하지 않은 경로가 있습니다.".to_string())?;
+        if enclosed == Path::new("manifest.json") {
+            continue;
+        }
+        if enclosed != Path::new("library.db") && !enclosed.starts_with("assets") {
+            continue;
+        }
+        let destination = temporary.join(enclosed);
+        if entry.is_dir() {
+            fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+        } else {
+            if let Some(directory) = destination.parent() {
+                fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+            }
+            let mut output = fs::File::create(&destination).map_err(|error| error.to_string())?;
+            std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+        }
+    }
+    let imported_database = temporary.join("library.db");
+    validate_package_database(&imported_database)?;
+    let integrity = check_integrity(&imported_database)?;
+    if !integrity.ok {
+        let _ = fs::remove_dir_all(&temporary);
+        return Err(format!(
+            "라이브러리 패키지가 완전하지 않습니다: {}",
+            integrity.message
+        ));
+    }
+    if target_database.exists() {
+        fs::remove_file(target_database).map_err(|error| error.to_string())?;
+    }
+    let current_assets = parent.join("assets");
+    if current_assets.exists() {
+        fs::remove_dir_all(&current_assets).map_err(|error| error.to_string())?;
+    }
+    fs::rename(imported_database, target_database).map_err(|error| error.to_string())?;
+    let imported_assets = temporary.join("assets");
+    if imported_assets.exists() {
+        fs::rename(imported_assets, current_assets).map_err(|error| error.to_string())?;
+    }
+    fs::remove_dir_all(temporary).map_err(|error| error.to_string())?;
+    initialize(target_database)
+}
+
+fn validate_package_database(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err("라이브러리 패키지에 library.db가 없습니다.".into());
+    }
+    let connection = Connection::open(path).map_err(|error| error.to_string())?;
+    let version: i64 = connection
+        .query_row(
+            "SELECT schema_version FROM library_info LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "지원하는 라이브러리 메타데이터가 아닙니다.".to_string())?;
+    if version != 1 {
+        return Err(format!("지원하지 않는 라이브러리 스키마입니다: {version}"));
+    }
+    Ok(())
+}
+
+fn copy_directory(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir_all(target).map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let destination = target.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            copy_directory(&entry.path(), &destination)?;
+        } else {
+            fs::copy(entry.path(), destination).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn add_directory_to_package(
+    zip: &mut ZipWriter<fs::File>,
+    source: &Path,
+    archive_path: &Path,
+    options: SimpleFileOptions,
+) -> Result<(), String> {
+    zip.add_directory(format!("{}/", archive_path.to_string_lossy()), options)
+        .map_err(|error| error.to_string())?;
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let next_archive_path = archive_path.join(entry.file_name());
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            add_directory_to_package(zip, &entry.path(), &next_archive_path, options)?;
+        } else {
+            add_file_to_package(
+                zip,
+                &entry.path(),
+                &next_archive_path.to_string_lossy(),
+                options,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn add_file_to_package(
+    zip: &mut ZipWriter<fs::File>,
+    source: &Path,
+    archive_path: &str,
+    options: SimpleFileOptions,
+) -> Result<(), String> {
+    zip.start_file(archive_path.replace('\\', "/"), options)
+        .map_err(|error| error.to_string())?;
+    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        zip.write_all(&buffer[..read])
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -620,9 +662,41 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn bundled_step_source_is_seeded_without_overwriting_existing_assets() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("library.db");
+        let resources = directory.path().join("parts");
+        let source = resources.join("molex/430250400.stp");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"ISO-10303-21;\nEND-ISO-10303-21;").unwrap();
+
+        assert_eq!(seed_builtin_model_assets(&path, &resources).unwrap(), 1);
+        assert_eq!(seed_builtin_model_assets(&path, &resources).unwrap(), 0);
+        let asset = get_model_asset(&path, "builtin-model-molex-430250400")
+            .unwrap()
+            .unwrap();
+        assert_eq!(asset.source_name, "430250400.stp");
+        assert_eq!(
+            BASE64.decode(asset.source_data_base64).unwrap(),
+            fs::read(source).unwrap()
+        );
+
+        seed_default_parts(&path).unwrap();
+        let part = list(&path)
+            .unwrap()
+            .into_iter()
+            .find(|part| part.id == "builtin-molex-43025-0400")
+            .unwrap();
+        assert_eq!(
+            part.model_asset_id.as_deref(),
+            Some("builtin-model-molex-430250400")
+        );
+    }
+
+    #[test]
     fn model_asset_round_trip_preserves_step_and_mesh() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("library.sqlite");
+        let path = directory.path().join("library.db");
         let asset = ModelAsset {
             id: "model-1".into(),
             name: "Housing 3D".into(),
@@ -645,12 +719,17 @@ mod tests {
         assert_eq!(loaded.source_data_base64, asset.source_data_base64);
         assert_eq!(loaded.meshes[0].name, "body");
         assert_eq!(loaded.meshes[0].color, Some([0.2, 0.4, 0.6]));
+        assert!(directory.path().join("assets/models/model-1.step").exists());
+        assert!(directory
+            .path()
+            .join("assets/models/model-1.mesh.json")
+            .exists());
     }
 
     #[test]
     fn symbol_asset_round_trip_preserves_svg() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("library.sqlite");
+        let path = directory.path().join("library.db");
         let asset = SymbolAsset {
             id: "symbol-1".into(),
             name: "Housing drawing".into(),
@@ -665,12 +744,16 @@ mod tests {
 
         assert_eq!(loaded.source_name, asset.source_name);
         assert_eq!(loaded.svg, asset.svg);
+        assert!(directory
+            .path()
+            .join("assets/drawings/symbol-1.svg")
+            .exists());
     }
 
     #[test]
     fn rotating_backup_keeps_requested_count_and_integrity_is_ok() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("parts.db");
+        let path = directory.path().join("library.db");
         initialize(&path).unwrap();
         for _ in 0..4 {
             create_rotating_backup(&path, 2).unwrap();
@@ -683,7 +766,7 @@ mod tests {
     #[test]
     fn default_library_covers_every_supported_category_without_overwriting_user_parts() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("parts.db");
+        let path = directory.path().join("library.db");
         initialize(&path).unwrap();
         assert_eq!(seed_default_parts(&path).unwrap(), 133);
         assert_eq!(seed_default_parts(&path).unwrap(), 0);
@@ -808,17 +891,9 @@ mod tests {
             .contains_key("officialImageUrl")
             && part.attributes.contains_key("drawingUrl")
             && part.attributes.contains_key("cadReferenceUrl")));
-        assert_eq!(
-            molex_connector_assets
-                .iter()
-                .filter(|part| part.model_asset_id.is_some())
-                .count(),
-            58
-        );
         assert!(molex_connector_assets
             .iter()
-            .filter_map(|part| part.model_asset_id.as_deref())
-            .all(|asset_id| get_model_asset(&path, asset_id).unwrap().is_some()));
+            .all(|part| part.model_asset_id.is_none()));
 
         let cable_core_counts = parts
             .iter()
@@ -863,19 +938,43 @@ mod tests {
         assert!(parts
             .iter()
             .filter(|part| part.category == "housing" && part.manufacturer == "Hirose")
-            .all(|part| part.model_asset_id.is_some()));
-        for asset_id in DEFAULT_MODEL_ASSETS.iter().map(|item| item.0) {
-            let asset = get_model_asset(&path, asset_id).unwrap().unwrap();
-            assert_eq!(asset.source_format, "step");
-            assert!(!asset.source_data_base64.is_empty());
-            assert!(asset.meshes.is_empty());
-        }
+            .all(|part| part.model_asset_id.is_none()));
+    }
+
+    #[test]
+    fn external_library_package_round_trip_preserves_assets() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let package_directory = tempfile::tempdir().unwrap();
+        let source_database = source.path().join("library.db");
+        let target_database = target.path().join("library.db");
+        let package = package_directory.path().join("shared.hlib");
+        let asset = ModelAsset {
+            id: "shared-model".into(),
+            name: "Shared model".into(),
+            source_format: "step".into(),
+            source_name: "shared.step".into(),
+            source_data_base64: BASE64.encode(b"ISO-10303-21;"),
+            meshes: Vec::new(),
+        };
+        upsert_model_asset(&source_database, &asset).unwrap();
+        export_package(&source_database, &package).unwrap();
+        import_package(&package, &target_database).unwrap();
+
+        let loaded = get_model_asset(&target_database, "shared-model")
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.source_data_base64, asset.source_data_base64);
+        assert!(target
+            .path()
+            .join("assets/models/shared-model.step")
+            .exists());
     }
 
     #[test]
     fn edited_builtin_part_is_not_overwritten_by_default_seed() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("parts.db");
+        let path = directory.path().join("library.db");
         initialize(&path).unwrap();
         seed_default_parts(&path).unwrap();
 

@@ -19,6 +19,10 @@ function storedPinMap(part: PartSnapshot): StoredPin[] {
   }
 }
 
+export function hasMappedPinPositions(part: PartSnapshot | undefined): boolean {
+  return part ? storedPinMap(part).length > 0 : false;
+}
+
 export function getPartPinCount(part: PartSnapshot): number {
   const pins = storedPinMap(part);
   if (pins.length) return pins.length;

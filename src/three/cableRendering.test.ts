@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PartSnapshot } from "../domain/types";
-import { getCableDisplayPolicy, getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan } from "./cableRendering";
+import { getCableDisplayPolicy, getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan, getIndividualWireOffsets, getWireRenderDiameterMm } from "./cableRendering";
 
 const cable: PartSnapshot = {
   id: "cable-1",
@@ -47,5 +47,23 @@ describe("다심 케이블 3D 표시 계산", () => {
     expect(getHeatShrinkRenderSpec(heatShrink)).toEqual({ finishedDiameterMm: 7, lengthMm: 40, color: "BK" });
     expect(getHeatShrinkSpan(100, 10, 40)).toEqual({ startMm: 0, endMm: 30 });
     expect(getHeatShrinkSpan(100, 80, 20)).toEqual({ startMm: 70, endMm: 90 });
+  });
+
+  it("단선은 등록 외경을 우선하고 없으면 AWG 굵기로 표시한다", () => {
+    const wire: PartSnapshot = { ...cable, id: "wire-1", category: "wire", gauge: "20 AWG", attributes: { outerDiameterMm: "2.2" } };
+    expect(getWireRenderDiameterMm(wire, "20 AWG")).toBe(2.2);
+    expect(getWireRenderDiameterMm({ ...wire, attributes: {} }, "12 AWG")).toBeGreaterThan(getWireRenderDiameterMm({ ...wire, attributes: {} }, "20 AWG"));
+    expect(getWireRenderDiameterMm({ ...wire, attributes: {} }, "20 AWG")).toBeGreaterThan(getWireRenderDiameterMm({ ...wire, attributes: {} }, "24 AWG"));
+    expect(getWireRenderDiameterMm({ ...wire, attributes: {} }, "20 AWG")).toBeCloseTo(0.812, 3);
+  });
+
+  it("굵기를 알 수 없는 기존 단선은 기존 표시 굵기를 유지한다", () => {
+    expect(getWireRenderDiameterMm(undefined, "")).toBe(2.3);
+  });
+
+  it("같은 구간의 여러 단선은 표면이 겹치지 않도록 분리한다", () => {
+    const offsets = getIndividualWireOffsets([2.2, 2.2]);
+    expect(offsets).toHaveLength(2);
+    expect(Math.hypot(offsets[1].x - offsets[0].x, offsets[1].y - offsets[0].y)).toBeGreaterThan(2.2);
   });
 });

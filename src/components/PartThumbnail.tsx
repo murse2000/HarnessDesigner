@@ -20,7 +20,7 @@ const categoryIcons: Record<PartCategory, ComponentType<{ size?: number }>> = {
   splice: GitFork,
 };
 
-export function PartThumbnail({ part, project, large = false }: { part: PartSnapshot; project?: ProjectDocument; large?: boolean }) {
+export function PartThumbnail({ part, project, large = false, loadAssetPreview = true }: { part: PartSnapshot; project?: ProjectDocument; large?: boolean; loadAssetPreview?: boolean }) {
   const [preview, setPreview] = useState<PartPreview | undefined>(() => selectStoredPreview(part) ?? getPartPhotoPreview(part));
 
   useEffect(() => {
@@ -36,6 +36,7 @@ export function PartThumbnail({ part, project, large = false }: { part: PartSnap
       return;
     }
     setPreview(undefined);
+    if (!loadAssetPreview) return;
     void (async () => {
       if (part.modelAssetId) {
         const asset = project?.modelAssets.find((item) => item.id === part.modelAssetId)
@@ -51,7 +52,7 @@ export function PartThumbnail({ part, project, large = false }: { part: PartSnap
       }
     })().catch(() => { if (!cancelled) setPreview(undefined); });
     return () => { cancelled = true; };
-  }, [part, project]);
+  }, [loadAssetPreview, part, project]);
 
   const Icon = categoryIcons[part.category];
   const label = preview?.kind === "photo" ? "사진" : preview?.kind === "model" ? "3D" : preview?.kind === "drawing" ? "도면" : "기본 이미지";

@@ -10,6 +10,7 @@ export interface RecoveryEntry { path: string; projectName: string; projectNumbe
 export function RecoveryDialog({ entries, onClose, onChange }: { entries: RecoveryEntry[]; onClose: () => void; onChange: (entries: RecoveryEntry[]) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const recover = async (entry: RecoveryEntry) => {
     try {
       setBusy(true); setError(null);
@@ -29,11 +30,20 @@ export function RecoveryDialog({ entries, onClose, onChange }: { entries: Recove
     } catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };
+  const removeAll = async () => {
+    try {
+      setBusy(true); setError(null);
+      await backendInvoke("delete_recovery_snapshots", { paths: entries.map((entry) => entry.path) });
+      onChange([]);
+      onClose();
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
   return <div className="modal-backdrop"><section className="recovery-dialog" role="dialog" aria-modal="true" aria-label="프로젝트 복구">
     <header><div><RotateCcw size={15} /><strong>저장되지 않은 프로젝트 복구</strong></div><IconButton title="나중에" onClick={onClose}><X size={14} /></IconButton></header>
     <p>자동 저장된 복구본을 새 프로젝트 창으로 엽니다. 원본 파일은 변경하지 않습니다.</p>
     <div>{entries.map((entry) => <article key={entry.path}><span><strong>{entry.projectNumber} · {entry.projectName}</strong><small>{entry.updatedAt}</small></span><button disabled={busy} onClick={() => void recover(entry)}>복구해서 열기</button><IconButton title="복구본 삭제" disabled={busy} onClick={() => void remove(entry)}><Trash2 size={12} /></IconButton></article>)}</div>
     {error && <div className="connector-library-error">{error}</div>}
-    <footer><button onClick={onClose}>나중에</button></footer>
+    <footer>{confirmDeleteAll ? <><span>{entries.length}개의 자동 저장 복구본을 모두 삭제합니다.</span><button disabled={busy} onClick={() => setConfirmDeleteAll(false)}>취소</button><button className="danger" disabled={busy} onClick={() => void removeAll()}><Trash2 size={12} />{busy ? "삭제 중…" : `${entries.length}개 모두 삭제`}</button></> : <><button className="danger" disabled={busy || !entries.length} onClick={() => setConfirmDeleteAll(true)}><Trash2 size={12} />전체 삭제</button><span /><button onClick={onClose}>나중에</button></>}</footer>
   </section></div>;
 }

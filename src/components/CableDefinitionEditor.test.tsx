@@ -33,6 +33,19 @@ describe("커스텀 멀티코어 케이블 등록 편집기", () => {
     expect(onApplyCommonGauge).toHaveBeenCalledOnce();
   });
 
+  it("색상 코드는 실제 색상 견본과 색상명으로 편집한다", () => {
+    const onCoreChange = vi.fn();
+    render(<CableDefinitionEditor {...commonProps} construction="multiCore" onCoreChange={onCoreChange} />);
+
+    const black = screen.getByLabelText("1 색상");
+    expect(black).toHaveValue("BK");
+    expect(black).toHaveTextContent("검정");
+    expect(black.parentElement).toHaveStyle({ "--wire-color": "#26323d" });
+
+    fireEvent.change(black, { target: { value: "RD" } });
+    expect(onCoreChange).toHaveBeenCalledWith("1", "color", "RD");
+  });
+
   it("실드 케이블에는 복수 드레인 결선 정의를 표시한다", () => {
     render(<CableDefinitionEditor {...commonProps} construction="shieldedMultiCore" />);
 

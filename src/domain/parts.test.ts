@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessNode, PartSnapshot } from "./types";
-import { createPinsFromPart, getCompatibleClampIds, getCompatibleTerminalIds, getPartName, getPartPinCount, isConnectorClampPart, nextConnectorReference, resolvePinTermination } from "./parts";
+import { createPinsFromPart, getCompatibleClampIds, getCompatibleTerminalIds, getPartName, getPartPinCount, hasMappedPinPositions, isConnectorClampPart, nextConnectorReference, resolvePinTermination } from "./parts";
 
 const housing: PartSnapshot = {
   id: "housing-1",
@@ -31,6 +31,13 @@ describe("커넥터 부품 정보", () => {
     const second = createPinsFromPart(mapped);
     expect(first[0]).toMatchObject({ number: "A1", name: "POWER", position: { x: 12, y: 18 } });
     expect(first[0].id).not.toBe(second[0].id);
+  });
+
+  it("DXF에 저장된 핀 좌표와 자동 생성 임시 좌표를 구분한다", () => {
+    const mapped = { ...housing, attributes: { ...housing.attributes, pinMap: JSON.stringify([{ number: "1", name: "", position: { x: 1.2, y: 2.4 } }]) } };
+
+    expect(hasMappedPinPositions(housing)).toBe(false);
+    expect(hasMappedPinPositions(mapped)).toBe(true);
   });
 
   it("핀 지정값이 없으면 하우징 기본 터미널과 터미널 기본 씰을 적용한다", () => {

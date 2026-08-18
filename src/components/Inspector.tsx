@@ -1,6 +1,7 @@
 import { Boxes, Cable, Map, Plus, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCableConductors } from "../domain/cables";
+import { deleteCanvasSelection } from "../domain/canvasSelection";
 import { getCompatibleTerminalIds, getPartName, getPartPinCount, resolvePinTermination } from "../domain/parts";
 import type { PartSnapshot } from "../domain/types";
 import { translate } from "../i18n";
@@ -21,6 +22,8 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
   const part = node?.partId ? snapshot.project.parts.find((item) => item.id === node.partId) : undefined;
   const segment = selectedEntityType === "segment" ? harness?.segments.find((item) => item.id === selectedEntityId) : undefined;
   const conductor = selectedEntityType === "conductor" ? harness?.conductors.find((item) => item.id === selectedEntityId) : undefined;
+  const accessory = selectedEntityType === "accessory" ? harness?.accessories.find((item) => item.id === selectedEntityId) : undefined;
+  const accessoryPart = accessory ? snapshot.project.parts.find((item) => item.id === accessory.partId) : undefined;
   const annotation = selectedEntityType === "annotation" ? harness?.drawingAnnotations?.find((item) => item.id === selectedEntityId) : undefined;
   const cablePart = segment?.cablePartId ? snapshot.project.parts.find((item) => item.id === segment.cablePartId) : undefined;
   const cableConductors = segment ? harness?.conductors.filter((item) => item.cableRunId === segment.id) ?? [] : [];
@@ -51,6 +54,7 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
     const entity = selectedEntityType === "node" ? current?.nodes.find((item) => item.id === selectedEntityId)
       : selectedEntityType === "segment" ? current?.segments.find((item) => item.id === selectedEntityId)
       : selectedEntityType === "conductor" ? current?.conductors.find((item) => item.id === selectedEntityId)
+      : selectedEntityType === "accessory" ? current?.accessories.find((item) => item.id === selectedEntityId)
       : current?.drawingAnnotations?.find((item) => item.id === selectedEntityId);
     if (entity) (entity as unknown as Record<string, unknown>)[field] = value;
   });
@@ -69,15 +73,13 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
     const current = project.harnesses.find((item) => item.id === activeHarnessId);
     if (!current || !selectedEntityId) return;
     if (selectedEntityType === "node") {
-      current.nodes = current.nodes.filter((item) => item.id !== selectedEntityId);
-      const removedSegments = new Set(current.segments.filter((item) => item.fromNodeId === selectedEntityId || item.toNodeId === selectedEntityId).map((item) => item.id));
-      current.segments = current.segments.filter((item) => !removedSegments.has(item.id));
-      current.conductors = current.conductors.filter((item) => item.from.nodeId !== selectedEntityId && item.to.nodeId !== selectedEntityId);
+      deleteCanvasSelection(current, [selectedEntityId]);
     } else if (selectedEntityType === "segment") {
       current.segments = current.segments.filter((item) => item.id !== selectedEntityId);
-      current.conductors = current.conductors.filter((item) => item.cableRunId !== selectedEntityId);
+      current.conductors = current.conductors.filter((item) => item.cableRunId !== selectedEntityId && !item.routeSegmentIds.includes(selectedEntityId));
     }
     else if (selectedEntityType === "conductor") current.conductors = current.conductors.filter((item) => item.id !== selectedEntityId);
+    else if (selectedEntityType === "accessory") current.accessories = current.accessories.filter((item) => item.id !== selectedEntityId);
     else if (selectedEntityType === "annotation") current.drawingAnnotations = (current.drawingAnnotations ?? []).filter((item) => item.id !== selectedEntityId);
     selectEntity(null);
   });
@@ -123,7 +125,7 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
   return <section className="panel inspector-panel">
     <PanelHeader title={translate(locale, "inspector")} icon={<SlidersHorizontal size={14} />} view="inspector" sessionId={detached ? undefined : snapshot.sessionId} harnessId={activeHarnessId ?? undefined} onDetach={onDetach} actions={<IconButton title="부품 라이브러리에서 커넥터 추가" disabled={!harness || harness.releaseStatus === "released"} onClick={() => openConnectorPicker()}><Plus size={13} /></IconButton>} />
     <div className="inspector-scroll">
-    {!node && !segment && !conductor && !annotation && <div className="inspector-form">
+    {!node && !segment && !conductor && !accessory && !annotation && <div className="inspector-form">
       <div className="entity-type"><span>PROJECT / HARNESS</span><code>DOCUMENT</code></div>
       <Field label="프로젝트 이름"><input value={snapshot.project.name} onChange={(event) => commitMetadata("project", "name", event.target.value)} /></Field>
       {harness ? <>
@@ -133,7 +135,7 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
         <ReleasePanel harnessId={harness.id} />
       </> : <EmptyState>하네스를 선택하세요.</EmptyState>}
     </div>}
-    {(node || segment || conductor || annotation) && <fieldset className="inspector-form inspector-form--locked" disabled={harness?.releaseStatus === "released"}>
+    {(node || segment || conductor || accessory || annotation) && <fieldset className="inspector-form inspector-form--locked" disabled={harness?.releaseStatus === "released"}>
       <div className="entity-type"><span>{segment?.cablePartId ? "CABLE RUN" : selectedEntityType}</span><code>{selectedEntityId?.slice(0, 12)}</code><IconButton title="삭제" onClick={deleteSelected}><Trash2 size={13} /></IconButton></div>
       {node && <>
         {part && <section className="inspector-part"><header><Boxes size={13} /><strong>PART INFORMATION</strong><button onClick={() => openConnectorPicker("replace", node.id)}><RefreshCw size={11} />부품 변경</button></header><dl><dt>파트명</dt><dd>{getPartName(part)}</dd><dt>파트번호</dt><dd><code>{part.partNumber}</code></dd><dt>제조사</dt><dd>{part.manufacturer || "—"}</dd><dt>핀 수</dt><dd>{getPartPinCount(part)}</dd><dt>Revision</dt><dd>{part.revision}</dd><dt>호환 터미널</dt><dd>{getCompatibleTerminalIds(part).map((id) => snapshot.project.parts.find((item) => item.id === id)?.partNumber).filter(Boolean).join(", ") || "미지정"}</dd></dl></section>}
@@ -165,6 +167,12 @@ export function Inspector({ onDetach, detached = false }: { onDetach?: () => voi
         <Field label="To Strip (mm)"><input type="number" min="0" value={conductor.endTermination.stripLengthMm ?? 0} onChange={(event) => commitTermination("end", "stripLengthMm", Number(event.target.value))} /></Field>
         <Field label="Connection Notes"><textarea rows={3} value={conductor.notes ?? ""} onChange={(event) => commitValue("notes", event.target.value)} /></Field>
         <Field label="Twist group"><input value={conductor.twistGroup ?? ""} onChange={(event) => commitValue("twistGroup", event.target.value)} /></Field>
+      </>}
+      {accessory && <>
+        <section className="inspector-part"><header><Boxes size={13} /><strong>ACCESSORY PART</strong></header><dl><dt>파트명</dt><dd>{accessoryPart ? getPartName(accessoryPart) : "미등록 부품"}</dd><dt>파트번호</dt><dd><code>{accessoryPart?.partNumber ?? accessory.partId}</code></dd><dt>제조사</dt><dd>{accessoryPart?.manufacturer || "—"}</dd><dt>카테고리</dt><dd>{accessoryPart?.category ?? "—"}</dd><dt>단위</dt><dd>{accessoryPart?.unit ?? "—"}</dd></dl></section>
+        <Field label="수량"><input type="number" min="0.01" step="0.01" value={accessory.quantity} onChange={(event) => commitValue("quantity", Math.max(0.01, Number(event.target.value)))} /></Field>
+        <Field label="Note"><textarea rows={3} value={accessory.note} onChange={(event) => commitValue("note", event.target.value)} /></Field>
+        <Field label="연결 대상"><input value={accessory.nodeId ? harness?.nodes.find((item) => item.id === accessory.nodeId)?.reference ?? accessory.nodeId : accessory.segmentId ? harness?.segments.find((item) => item.id === accessory.segmentId)?.label ?? accessory.segmentId : "도면 자유 배치"} disabled /></Field>
       </>}
       {annotation && <>
         {annotation.kind === "image" && annotation.imageDataUrl && <div className="annotation-preview"><img src={annotation.imageDataUrl} alt={annotation.text || "도면 첨부 이미지"} /></div>}

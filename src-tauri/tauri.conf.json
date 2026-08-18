@@ -32,7 +32,8 @@
     "resources": {
       "../node_modules/occt-import-js/LICENSE.md": "licenses/occt-import-js-LGPL-2.1.txt",
       "../node_modules/occt-import-js/dist/license.occt.txt": "licenses/OpenCASCADE-LGPL-2.1-exception.txt",
-      "../node_modules/three/LICENSE": "licenses/three-MIT.txt"
+      "../node_modules/three/LICENSE": "licenses/three-MIT.txt",
+      "assets/parts/": "parts"
     },
     "icon": [
       "icons/32x32.png",

@@ -3,14 +3,15 @@ import { createPortal } from "react-dom";
 import { Background, BackgroundVariant, ConnectionMode, Controls, Handle, MiniMap, Panel, Position, ReactFlow, SelectionMode, useNodesState, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AlignHorizontalJustifyCenter, AlignHorizontalJustifyStart, AlignHorizontalSpaceBetween, AlignVerticalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalSpaceBetween, Box, Cable, Clipboard, Copy, Eye, EyeOff, FlipHorizontal, FlipVertical, GitFork, Layers, LocateFixed, LockKeyhole, Maximize2, Pencil, Plus, RotateCcw, Search, Trash2, Unlock, Workflow, X } from "lucide-react";
-import type { DrawingAnnotation, DrawingTableKind, HarnessNode, HarnessSegment, PartSnapshot, Point } from "../domain/types";
+import type { DrawingAnnotation, DrawingTableKind, HarnessNode, HarnessSegment, PartSnapshot, Point, SymbolAsset } from "../domain/types";
 import { arrangeCanvasPoints, nudgeCanvasPoints, type CanvasLayoutCommand } from "../domain/canvasLayout";
-import { sameCanvasEntitySelection, sameCanvasSelection } from "../domain/canvasSelection";
+import { buildAccessoryDrawingPlacements, updateAccessoryDrawingSize } from "../domain/accessoryDrawing";
+import { deleteCanvasSelection, sameCanvasEntitySelection, sameCanvasSelection } from "../domain/canvasSelection";
 import { canvasLayerIds, canvasLayerZIndex, createCanvasLayers, updateCanvasLayer, type CanvasLayerId } from "../domain/canvasLayers";
 import { isCableRunSegment } from "../domain/cables";
 import { pinConductorCapacity, pinConductorUsage, pinHasConductorCapacity } from "../domain/pinCapacity";
 import { findUniqueSegmentRoute, hasRenderableEndpoints, hasSegmentRoute } from "../domain/pinmap";
-import { nextConnectorReference } from "../domain/parts";
+import { getPartName, nextConnectorReference } from "../domain/parts";
 import { buildHarnessDrawingSummary } from "../domain/drawingSummary";
 import { searchPinDestinations } from "../domain/destinations";
 import { activeDrawingTemplate } from "../preferences";
@@ -21,9 +22,10 @@ import { CanvasQuickEdit, type CanvasQuickEditTarget } from "./CanvasQuickEdit";
 import { DrawingSheetNode, type DrawingSheetFlowNode } from "./DrawingSheetNode";
 import { DrawingAnnotationNode, type DrawingAnnotationFlowNode } from "./DrawingAnnotationNode";
 import { EditableConductorEdge } from "./EditableConductorEdge";
+import { AccessoryNode, type AccessoryFlowNode } from "./AccessoryNode";
 
-type HarnessFlowNode = Node<{ model: HarnessNode; part?: PartSnapshot; pinStates: Array<{ id: string; usage: number; capacity: number }>; pinPosition: Position; externallySelected: boolean; destinationMode: boolean; onEdit: (id: string, x: number, y: number) => void; onDestination: (nodeId: string, pinId: string, x: number, y: number) => void }, "harness">;
-type CanvasFlowNode = HarnessFlowNode | DrawingSheetFlowNode | DrawingAnnotationFlowNode;
+type HarnessFlowNode = Node<{ model: HarnessNode; part?: PartSnapshot; symbol?: SymbolAsset; pinStates: Array<{ id: string; usage: number; capacity: number }>; pinPosition: Position; externallySelected: boolean; destinationMode: boolean; onEdit: (id: string, x: number, y: number) => void; onPinEdit: (nodeId: string, pinId: string, x: number, y: number) => void; onDestination: (nodeId: string, pinId: string, x: number, y: number) => void }, "harness">;
+type CanvasFlowNode = HarnessFlowNode | AccessoryFlowNode | DrawingSheetFlowNode | DrawingAnnotationFlowNode;
 const drawingSheetNodeId = "__drawing-sheet";
 
 function pinHandleId(pinId: string) {
@@ -39,6 +41,10 @@ function conductorColor(color: string) {
   return colors[color.trim().toUpperCase()] ?? "#54728a";
 }
 
+function heatShrinkDrawingPart(part: PartSnapshot | undefined) {
+  return part ? { partNumber: part.partNumber, color: conductorColor(part.color ?? "BK") } : undefined;
+}
+
 function HarnessNodeView({ data, selected }: NodeProps<HarnessFlowNode>) {
   const node = data.model;
   const Icon = node.kind === "connector" ? Box : node.kind === "splice" ? GitFork : Workflow;
@@ -46,25 +52,26 @@ function HarnessNodeView({ data, selected }: NodeProps<HarnessFlowNode>) {
     <Handle id="bundle-left" type="source" position={Position.Left} isConnectable={false} className="harness-node__bundle-handle" />
     <Handle id="bundle-right" type="source" position={Position.Right} isConnectable={false} className="harness-node__bundle-handle" />
     <div className="harness-node__head"><Icon size={12} /><strong>{node.reference}</strong><span>{node.pins.length ? `${node.pins.length}P` : node.kind.toUpperCase()}</span></div>
-    <div className="harness-node__body"><strong>{node.label}</strong>{data.part && <span>{data.part.partNumber} · {data.part.manufacturer}</span>}{node.pins.length > 0 && <div className="harness-node__pins">{node.pins.map((pin) => {
+    <div className="harness-node__body"><strong>{node.label}</strong>{data.part && <span>{data.part.partNumber} · {data.part.manufacturer}</span>}{data.symbol && <div className="harness-node__symbol" dangerouslySetInnerHTML={{ __html: data.symbol.svg }} />}{node.pins.length > 0 && <div className="harness-node__pins">{node.pins.map((pin) => {
       const state = data.pinStates.find((item) => item.id === pin.id) ?? { usage: 0, capacity: 1 };
       const occupied = state.usage > 0;
       const full = state.usage >= state.capacity;
-      return <div key={pin.id} className={`harness-node__pin ${occupied ? "is-occupied" : ""} ${full ? "is-full" : ""} ${data.destinationMode ? "is-destination-mode" : ""}`}><Handle id={pinHandleId(pin.id)} type="source" position={data.pinPosition} isConnectable={!full} /><b>{pin.number}</b><span>{pin.name || "PIN"}</span><small>{state.usage}/{state.capacity}</small>{data.destinationMode && <button type="button" className="harness-node__destination nodrag nopan" title={full ? "핀 용량이 가득 찼습니다" : "목적지 핀 검색"} disabled={full} onClick={(event) => { event.preventDefault(); event.stopPropagation(); data.onDestination(node.id, pin.id, event.clientX, event.clientY); }}><LocateFixed size={9} /></button>}</div>;
+      return <div key={pin.id} className={`harness-node__pin ${occupied ? "is-occupied" : ""} ${full ? "is-full" : ""} ${data.destinationMode ? "is-destination-mode" : ""}`}><Handle id={pinHandleId(pin.id)} type="source" position={data.pinPosition} isConnectable={!full} /><button type="button" className="harness-node__pin-edit nodrag nopan" title={`${node.reference} 핀 ${pin.number} 이름 수정`} onClick={(event) => { event.preventDefault(); event.stopPropagation(); data.onPinEdit(node.id, pin.id, event.clientX, event.clientY); }}><b>{pin.number}</b><span>{pin.name || "PIN"}</span></button><small>{state.usage}/{state.capacity}</small>{data.destinationMode && <button type="button" className="harness-node__destination nodrag nopan" title={full ? "핀 용량이 가득 찼습니다" : "목적지 핀 검색"} disabled={full} onClick={(event) => { event.preventDefault(); event.stopPropagation(); data.onDestination(node.id, pin.id, event.clientX, event.clientY); }}><LocateFixed size={9} /></button>}</div>;
     })}</div>}</div>
   </div>;
 }
 
-const nodeTypes = { harness: HarnessNodeView, "drawing-sheet": DrawingSheetNode, "drawing-annotation": DrawingAnnotationNode };
+const nodeTypes = { harness: HarnessNodeView, accessory: AccessoryNode, "drawing-sheet": DrawingSheetNode, "drawing-annotation": DrawingAnnotationNode };
 const edgeTypes = { "editable-conductor": EditableConductorEdge, "cable-jacket": CableJacketEdge };
 const cableBreakoutDisplayLength = 110;
 type CableDrawingRoute = NonNullable<HarnessSegment["drawingRoute"]>;
 
 export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: string; minimapTargetId?: string | null } = {}) {
-  const { snapshot, activeHarnessId, selectedEntityId, selectedEntityType, selectEntity, updateProject, preferences, openConnectorPicker, openPinMapEditor, openCableRunEditor } = useProjectStore();
+  const { snapshot, activeHarnessId, selectedEntityId, selectedEntityType, selectEntity, updateProject, preferences, openConnectorPicker, openAccessoryPicker, openPinMapEditor, openCableRunEditor } = useProjectStore();
   const harness = snapshot?.project.harnesses.find((item) => item.id === (harnessId ?? activeHarnessId));
   const canvasRef = useRef<HTMLDivElement>(null);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
+  const [selectedCanvasAccessoryIds, setSelectedCanvasAccessoryIds] = useState<string[]>([]);
   const [canvasLayers, setCanvasLayers] = useState(createCanvasLayers);
   const [layersOpen, setLayersOpen] = useState(false);
   const [destinationMode, setDestinationMode] = useState(false);
@@ -79,6 +86,18 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
     if (!harness || harness.releaseStatus === "released") return;
     const annotation = harness.drawingAnnotations?.find((item) => item.id === id);
     if (annotation) setQuickEdit({ x, y, target: { kind: "annotation", id: annotation.id, annotationKind: annotation.kind, text: annotation.text, width: annotation.width, height: annotation.height, fillColor: annotation.fillColor, strokeColor: annotation.strokeColor } });
+  }, [harness]);
+  const openAccessoryLabelQuickEdit = useCallback((id: string, x: number, y: number) => {
+    if (!harness || harness.releaseStatus === "released") return;
+    const accessory = harness.accessories.find((item) => item.id === id);
+    const part = snapshot?.project.parts.find((item) => item.id === accessory?.partId);
+    if (accessory && part?.category === "label") setQuickEdit({ x, y, target: { kind: "accessoryLabel", id: accessory.id, text: accessory.note || getPartName(part) } });
+  }, [harness, snapshot?.project.parts]);
+  const openPinQuickEdit = useCallback((nodeId: string, pinId: string, x: number, y: number) => {
+    if (!harness || harness.releaseStatus === "released") return;
+    const node = harness.nodes.find((item) => item.id === nodeId);
+    const pin = node?.pins.find((item) => item.id === pinId);
+    if (node && pin) setQuickEdit({ x, y, target: { kind: "pin", id: pin.id, nodeId: node.id, nodeReference: node.reference, number: pin.number, name: pin.name } });
   }, [harness]);
   const openDestinationPicker = useCallback((nodeId: string, pinId: string, x: number, y: number) => {
     setDestinationPicker({ nodeId, pinId, x: Math.min(x + 8, window.innerWidth - 330), y: Math.min(y + 8, window.innerHeight - 360), query: "" });
@@ -99,6 +118,14 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       annotation.position = { x: Math.round(size.x), y: Math.round(size.y) };
       annotation.width = Math.round(size.width);
       annotation.height = Math.round(size.height);
+    });
+  }, [harness, updateProject]);
+  const commitAccessoryLabelResize = useCallback((id: string, size: { x: number; y: number; width: number; height: number }) => {
+    if (!harness || harness.releaseStatus === "released") return;
+    void updateProject((project) => {
+      const accessory = project.harnesses.find((item) => item.id === harness.id)?.accessories.find((item) => item.id === id);
+      if (!accessory) return;
+      updateAccessoryDrawingSize(accessory, size);
     });
   }, [harness, updateProject]);
   const projectNodes = useMemo<CanvasFlowNode[]>(() => {
@@ -153,14 +180,17 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       zIndex: 8,
       draggable: !canvasLayers.annotations.locked && harness.releaseStatus !== "released",
     })) : [];
-    const harnessNodes: HarnessFlowNode[] = canvasLayers.nodes.visible ? harness.nodes.map((node) => ({
+    const harnessNodes: HarnessFlowNode[] = canvasLayers.nodes.visible ? harness.nodes.map((node) => {
+      const part = snapshot?.project.parts.find((item) => item.id === node.partId);
+      return ({
       id: node.id,
       type: "harness" as const,
       position: node.position,
       data: {
         model: node,
         externallySelected: node.id === selectedEntityId,
-        part: snapshot?.project.parts.find((part) => part.id === node.partId),
+        part,
+        symbol: snapshot?.project.assets.find((asset) => asset.id === part?.symbolAssetId),
         pinStates: node.pins.map((pin) => ({
           id: pin.id,
           usage: pinConductorUsage(harness, node.id, pin.id),
@@ -169,16 +199,30 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
         pinPosition: node.position.x <= centerX ? Position.Right : Position.Left,
         destinationMode,
         onEdit: canvasLayers.nodes.locked ? () => undefined : openNodeQuickEdit,
+        onPinEdit: canvasLayers.nodes.locked ? () => undefined : openPinQuickEdit,
         onDestination: openDestinationPicker,
       },
       draggable: !canvasLayers.nodes.locked && harness.releaseStatus !== "released",
       connectable: !canvasLayers.nodes.locked && harness.releaseStatus !== "released",
+    }); }) : [];
+    const accessoryNodes: AccessoryFlowNode[] = canvasLayers.accessories.visible ? buildAccessoryDrawingPlacements(harness, parts).map((accessory) => ({
+      id: `accessory:${accessory.id}`,
+      type: "accessory",
+      position: accessory.position,
+      data: { accessoryId: accessory.id, partNumber: accessory.partNumber, category: accessory.category, quantity: accessory.quantity, note: accessory.note, externallySelected: selectedEntityType === "accessory" && accessory.id === selectedEntityId, onEdit: canvasLayers.accessories.locked ? undefined : openAccessoryLabelQuickEdit, onResize: canvasLayers.accessories.locked || harness.releaseStatus === "released" ? undefined : commitAccessoryLabelResize },
+      style: accessory.category === "label" ? { width: accessory.width, height: accessory.height } : undefined,
+      draggable: !canvasLayers.accessories.locked && harness.releaseStatus !== "released",
+      selectable: true,
+      connectable: false,
+      deletable: false,
+      focusable: true,
+      zIndex: accessory.category === "label" ? canvasLayerZIndex.labels : canvasLayerZIndex.accessories,
     })) : [];
-    return [...drawingSheet, ...harnessNodes, ...annotationNodes];
-  }, [canvasLayers, commitAnnotationResize, commitDrawingTableOffset, destinationMode, harness, openAnnotationQuickEdit, openDestinationPicker, openNodeQuickEdit, preferences, selectedEntityId, snapshot?.project.name, snapshot?.project.parts, snapshot?.project.projectNumber]);
+    return [...drawingSheet, ...harnessNodes, ...accessoryNodes, ...annotationNodes];
+  }, [canvasLayers, commitAccessoryLabelResize, commitAnnotationResize, commitDrawingTableOffset, destinationMode, harness, openAccessoryLabelQuickEdit, openAnnotationQuickEdit, openDestinationPicker, openNodeQuickEdit, openPinQuickEdit, preferences, selectedEntityId, selectedEntityType, snapshot?.project.assets, snapshot?.project.name, snapshot?.project.parts, snapshot?.project.projectNumber]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasFlowNode>(projectNodes);
   const [flow, setFlow] = useState<ReactFlowInstance<CanvasFlowNode, Edge> | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; kind: "pane" | "node" | "segment" | "conductor" | "annotation"; id?: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: "pane" | "node" | "segment" | "conductor" | "accessory" | "annotation"; id?: string } | null>(null);
   const [cableRoutePreviews, setCableRoutePreviews] = useState<Record<string, CableDrawingRoute>>({});
   const [minimapTarget, setMinimapTarget] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -230,7 +274,7 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
     const selected = new Map(current.map((node) => [node.id, Boolean(node.selected)]));
     return projectNodes.map((node) => ({ ...node, selected: selected.get(node.id) ?? false }));
   }), [projectNodes, setNodes]);
-  useEffect(() => { setQuickEdit(null); setSelectedCanvasNodeIds([]); }, [harness?.id]);
+  useEffect(() => { setQuickEdit(null); setSelectedCanvasNodeIds([]); setSelectedCanvasAccessoryIds([]); }, [harness?.id]);
 
   const selectedPositions = useCallback(() => {
     if (!harness) return {};
@@ -252,12 +296,17 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
     commitSelectedPositions(arrangeCanvasPoints(selectedPositions(), command));
   }, [commitSelectedPositions, selectedPositions]);
   const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: CanvasFlowNode[]; edges: Edge[] }) => {
-    const ids = selectedNodes.filter((node) => node.id !== drawingSheetNodeId).map((node) => node.id);
+    const ids = selectedNodes.filter((node) => node.id !== drawingSheetNodeId && node.type !== "accessory").map((node) => node.id);
+    const accessoryIds = selectedNodes.filter((node): node is AccessoryFlowNode => node.type === "accessory").map((node) => node.data.accessoryId);
     setSelectedCanvasNodeIds((current) => sameCanvasSelection(current, ids) ? current : ids);
-    if (ids.length === 1) {
+    setSelectedCanvasAccessoryIds((current) => sameCanvasSelection(current, accessoryIds) ? current : accessoryIds);
+    if (selectedNodes.length === 1 && ids.length === 1) {
       const node = selectedNodes.find((item) => item.id === ids[0]);
       const type = node?.type === "drawing-annotation" ? "annotation" : "node";
       if (!sameCanvasEntitySelection(selectedEntityId, selectedEntityType, ids[0], type)) selectEntity(ids[0], type);
+    } else if (selectedNodes.length === 1 && selectedNodes[0].type === "accessory") {
+      const accessoryId = selectedNodes[0].data.accessoryId;
+      if (!sameCanvasEntitySelection(selectedEntityId, selectedEntityType, accessoryId, "accessory")) selectEntity(accessoryId, "accessory");
     }
   }, [selectEntity, selectedEntityId, selectedEntityType]);
   const handleCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -278,26 +327,38 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
     const handleCommand = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
       if (command === "fitView") void flow?.fitView({ duration: 200, padding: 0.15 });
-      if (command !== "deleteSelection" || !harness || !selectedEntityId || !selectedEntityType) return;
+      if (command !== "deleteSelection" || !harness) return;
+      const canvasSelectionCount = selectedCanvasNodeIds.length + selectedCanvasAccessoryIds.length;
+      if (canvasSelectionCount > 1) {
+        if (!window.confirm(`선택한 도면 객체 ${canvasSelectionCount}개를 삭제하시겠습니까?`)) return;
+        void updateProject((project) => {
+          const current = project.harnesses.find((item) => item.id === harness.id);
+          if (current) deleteCanvasSelection(current, selectedCanvasNodeIds, selectedCanvasAccessoryIds);
+        }).then(() => {
+          setSelectedCanvasNodeIds([]);
+          setSelectedCanvasAccessoryIds([]);
+          selectEntity(null);
+        });
+        return;
+      }
+      if (!selectedEntityId || !selectedEntityType) return;
       if (!window.confirm("선택한 도면 객체를 삭제하시겠습니까?")) return;
       void updateProject((project) => {
         const current = project.harnesses.find((item) => item.id === harness.id);
         if (!current) return;
         if (selectedEntityType === "node") {
-          const removedSegments = new Set(current.segments.filter((item) => item.fromNodeId === selectedEntityId || item.toNodeId === selectedEntityId).map((item) => item.id));
-          current.nodes = current.nodes.filter((item) => item.id !== selectedEntityId);
-          current.segments = current.segments.filter((item) => !removedSegments.has(item.id));
-          current.conductors = current.conductors.filter((item) => item.from.nodeId !== selectedEntityId && item.to.nodeId !== selectedEntityId);
+          deleteCanvasSelection(current, [selectedEntityId]);
         } else if (selectedEntityType === "segment") {
           current.segments = current.segments.filter((item) => item.id !== selectedEntityId);
-          current.conductors = current.conductors.filter((item) => item.cableRunId !== selectedEntityId);
+          current.conductors = current.conductors.filter((item) => item.cableRunId !== selectedEntityId && !item.routeSegmentIds.includes(selectedEntityId));
         } else if (selectedEntityType === "conductor") current.conductors = current.conductors.filter((item) => item.id !== selectedEntityId);
+        else if (selectedEntityType === "accessory") current.accessories = current.accessories.filter((item) => item.id !== selectedEntityId);
         else current.drawingAnnotations = (current.drawingAnnotations ?? []).filter((item) => item.id !== selectedEntityId);
       }).then(() => selectEntity(null));
     };
     window.addEventListener("harness-command", handleCommand);
     return () => window.removeEventListener("harness-command", handleCommand);
-  }, [flow, harness, selectEntity, selectedEntityId, selectedEntityType, updateProject]);
+  }, [flow, harness, selectEntity, selectedCanvasAccessoryIds, selectedCanvasNodeIds, selectedEntityId, selectedEntityType, updateProject]);
   const openConductorEditor = useCallback((wireId: string) => {
     if (!harness || harness.releaseStatus === "released") return;
     const wire = harness.conductors.find((item) => item.id === wireId);
@@ -318,9 +379,15 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       if (draft.kind === "node") {
         const node = current.nodes.find((item) => item.id === draft.id);
         if (node) { node.reference = draft.reference.trim(); node.label = draft.label.trim(); }
+      } else if (draft.kind === "pin") {
+        const pin = current.nodes.find((item) => item.id === draft.nodeId)?.pins.find((item) => item.id === draft.id);
+        if (pin) pin.name = draft.name.trim();
       } else if (draft.kind === "segment") {
         const segment = current.segments.find((item) => item.id === draft.id);
         if (segment) { segment.label = draft.label.trim(); segment.lengthMm = draft.lengthMm; }
+      } else if (draft.kind === "accessoryLabel") {
+        const accessory = current.accessories.find((item) => item.id === draft.id);
+        if (accessory) accessory.note = draft.text.trim();
       } else {
         const annotation = current.drawingAnnotations?.find((item) => item.id === draft.id);
         if (annotation) {
@@ -333,7 +400,8 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       }
     }).then(() => {
       setQuickEdit(null);
-      selectEntity(draft.id, draft.kind === "node" ? "node" : draft.kind === "segment" ? "segment" : "annotation");
+      if (draft.kind === "pin") selectEntity(draft.nodeId, "node");
+      else selectEntity(draft.id, draft.kind === "node" ? "node" : draft.kind === "segment" ? "segment" : draft.kind === "accessoryLabel" ? "accessory" : "annotation");
     });
   }, [harness, selectEntity, updateProject]);
   const edges = useMemo<Edge[]>(() => {
@@ -373,6 +441,11 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
           onRoutePreview: previewCableRoute,
           onRouteCommit: commitCableRoute,
           onRouteCancel: clearCableRoutePreview,
+          heatShrink: {
+            source: heatShrinkDrawingPart(partById.get(segment.startHeatShrinkPartId ?? "")),
+            target: heatShrinkDrawingPart(partById.get(segment.endHeatShrinkPartId ?? "")),
+          },
+          coverings: [segment.sleevePartId, segment.shieldPartId, segment.tapePartId].flatMap((partId) => { const part = partId ? partById.get(partId) : undefined; return part ? [`${part.category.toUpperCase()} · ${part.partNumber}`] : []; }),
         },
         labelStyle: { fontSize: 10, fontWeight: 650, fill: "var(--text-2)" },
         labelBgStyle: { fill: "var(--canvas)", fillOpacity: 0.94 },
@@ -432,21 +505,19 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
   if (!harness) return <div className="canvas-empty"><Cable size={36} /><span>하네스를 선택하세요.</span></div>;
   const released = harness.releaseStatus === "released";
 
-  const deleteEntity = (kind: "node" | "segment" | "conductor" | "annotation", id: string) => {
-    if (!window.confirm(`선택한 ${kind === "node" ? "노드" : kind === "segment" ? "구간" : kind === "conductor" ? "핀 연결" : "도면 주석"}을 삭제하시겠습니까?`)) return;
+  const deleteEntity = (kind: "node" | "segment" | "conductor" | "accessory" | "annotation", id: string) => {
+    if (!window.confirm(`선택한 ${kind === "node" ? "노드" : kind === "segment" ? "구간" : kind === "conductor" ? "핀 연결" : kind === "accessory" ? "부자재" : "도면 주석"}을 삭제하시겠습니까?`)) return;
     void updateProject((project) => {
       const current = project.harnesses.find((item) => item.id === harness?.id);
       if (!current) return;
       if (kind === "node") {
-        const removedSegments = new Set(current.segments.filter((item) => item.fromNodeId === id || item.toNodeId === id).map((item) => item.id));
-        current.nodes = current.nodes.filter((item) => item.id !== id);
-        current.segments = current.segments.filter((item) => !removedSegments.has(item.id));
-        current.conductors = current.conductors.filter((item) => item.from.nodeId !== id && item.to.nodeId !== id);
+        deleteCanvasSelection(current, [id]);
       } else if (kind === "segment") {
         current.segments = current.segments.filter((item) => item.id !== id);
-        current.conductors = current.conductors.filter((item) => item.cableRunId !== id);
+        current.conductors = current.conductors.filter((item) => item.cableRunId !== id && !item.routeSegmentIds.includes(id));
       }
       else if (kind === "conductor") current.conductors = current.conductors.filter((item) => item.id !== id);
+      else if (kind === "accessory") current.accessories = current.accessories.filter((item) => item.id !== id);
       else current.drawingAnnotations = (current.drawingAnnotations ?? []).filter((item) => item.id !== id);
     });
     selectEntity(null);
@@ -497,6 +568,7 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
     if (!menu) return [];
     if (menu.kind === "pane") return [
       { label: "라이브러리에서 커넥터 추가", icon: <Plus size={12} />, disabled: released, action: () => openConnectorPicker() },
+      { label: "라이브러리에서 부자재 추가", icon: <Plus size={12} />, disabled: released, action: () => openAccessoryPicker() },
       { label: "멀티코어 케이블 추가", icon: <Cable size={12} />, disabled: released || harness.nodes.filter((node) => node.kind === "connector").length < 2, action: openCableRunEditor },
       { label: "핀맵 연결 추가", icon: <Cable size={12} />, disabled: released || harness.nodes.length < 2, action: () => openPinMapEditor() },
       { label: "전체 화면 맞춤", icon: <Maximize2 size={12} />, separatorBefore: true, action: () => void flow?.fitView({ duration: 200, padding: 0.15 }) },
@@ -526,6 +598,15 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
         { label: "좌우 뒤집기", icon: <FlipHorizontal size={12} />, disabled: released || annotation?.kind !== "image", action: () => updateAnnotation((item) => { item.flippedX = !item.flippedX; }) },
         { label: "상하 뒤집기", icon: <FlipVertical size={12} />, disabled: released || annotation?.kind !== "image", action: () => updateAnnotation((item) => { item.flippedY = !item.flippedY; }) },
         { label: "주석 삭제", icon: <Trash2 size={12} />, disabled: released, danger: true, separatorBefore: true, action: () => menu.id && deleteEntity("annotation", menu.id) },
+      ];
+    }
+    if (menu.kind === "accessory") {
+      const accessory = harness.accessories.find((item) => item.id === menu.id);
+      const part = snapshot?.project.parts.find((item) => item.id === accessory?.partId);
+      return [
+        { label: "속성 열기", icon: <Pencil size={12} />, action: () => menu.id && selectEntity(menu.id, "accessory") },
+        { label: "파트번호 복사", icon: <Clipboard size={12} />, disabled: !part, action: () => part && void navigator.clipboard.writeText(part.partNumber) },
+        { label: "부자재 삭제", icon: <Trash2 size={12} />, disabled: released, danger: true, separatorBefore: true, action: () => menu.id && deleteEntity("accessory", menu.id) },
       ];
     }
     if (menu.kind === "conductor") {
@@ -579,7 +660,6 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
   };
 
   return <div className="canvas-shell" ref={canvasRef} tabIndex={0} onKeyDown={handleCanvasKeyDown} onPointerDown={() => canvasRef.current?.focus()}>
-    <div className="canvas-breadcrumb"><span>{snapshot?.project.projectNumber}</span><b>/</b><strong>{harness.number}</strong><span>{harness.name}</span><em>REV {harness.revision}</em>{released && <em>RELEASED</em>}</div>
     <ReactFlow<CanvasFlowNode, Edge>
       nodes={nodes}
       edges={edges}
@@ -596,7 +676,10 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       onInit={setFlow}
       onNodesChange={onNodesChange}
       onSelectionChange={handleSelectionChange}
-      onSelectionDragStop={(_, selectedNodes) => commitSelectedPositions(Object.fromEntries(selectedNodes.filter((node) => node.id !== drawingSheetNodeId).map((node) => [node.id, node.position])))}
+      onSelectionDragStop={(_, selectedNodes) => {
+        const positions = Object.fromEntries(selectedNodes.filter((node) => node.id !== drawingSheetNodeId && node.type !== "accessory").map((node) => [node.id, node.position]));
+        if (Object.keys(positions).length) commitSelectedPositions(positions);
+      }}
       fitView
       snapToGrid={preferences.gridSnap}
       snapGrid={[preferences.gridSize, preferences.gridSize]}
@@ -611,24 +694,31 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
       multiSelectionKeyCode={["Meta", "Control"]}
       panOnDrag={[1, 2]}
       deleteKeyCode={null}
-      onNodeClick={(_, node) => { if (node.id !== drawingSheetNodeId && selectedCanvasNodeIds.length <= 1) selectEntity(node.id, node.type === "drawing-annotation" ? "annotation" : "node"); }}
-      onEdgeClick={(_, edge) => { setSelectedCanvasNodeIds([]); selectEntity(String(edge.data?.entityId ?? edge.id), edge.data?.entityType === "conductor" ? "conductor" : "segment"); }}
+      onNodeClick={(_, node) => { if (node.id === drawingSheetNodeId || selectedCanvasNodeIds.length > 1) return; if (node.type === "accessory") selectEntity(node.data.accessoryId, "accessory"); else selectEntity(node.id, node.type === "drawing-annotation" ? "annotation" : "node"); }}
+      onEdgeClick={(_, edge) => { setSelectedCanvasNodeIds([]); setSelectedCanvasAccessoryIds([]); selectEntity(String(edge.data?.entityId ?? edge.id), edge.data?.entityType === "conductor" ? "conductor" : "segment"); }}
       onEdgeDoubleClick={(event, edge) => {
         event.preventDefault();
         const id = String(edge.data?.entityId ?? edge.id);
         if (edge.data?.entityType === "conductor") openConductorEditor(id);
         else openSegmentEditor(id);
       }}
-      onPaneClick={() => { setSelectedCanvasNodeIds([]); selectEntity(null); }}
+      onPaneClick={() => { setSelectedCanvasNodeIds([]); setSelectedCanvasAccessoryIds([]); selectEntity(null); }}
       onPaneContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, kind: "pane" }); }}
-      onNodeContextMenu={(event, node) => { if (node.id === drawingSheetNodeId) return; const kind = node.type === "drawing-annotation" ? "annotation" : "node"; event.preventDefault(); selectEntity(node.id, kind); setMenu({ x: event.clientX, y: event.clientY, kind, id: node.id }); }}
+      onNodeContextMenu={(event, node) => { if (node.id === drawingSheetNodeId) return; const kind = node.type === "drawing-annotation" ? "annotation" : node.type === "accessory" ? "accessory" : "node"; const id = node.type === "accessory" ? node.data.accessoryId : node.id; event.preventDefault(); selectEntity(id, kind); setMenu({ x: event.clientX, y: event.clientY, kind, id }); }}
       onEdgeContextMenu={(event, edge) => { const kind = edge.data?.entityType === "conductor" ? "conductor" : "segment"; const id = String(edge.data?.entityId ?? edge.id); event.preventDefault(); selectEntity(id, kind); setMenu({ x: event.clientX, y: event.clientY, kind, id }); }}
-      onNodeDragStop={(_, flowNode) => selectedCanvasNodeIds.length > 1 || (flowNode.type === "drawing-annotation" ? canvasLayers.annotations.locked : canvasLayers.nodes.locked) ? undefined : void updateProject((project) => {
+      onNodeDragStop={(_, flowNode) => selectedCanvasNodeIds.length > 1 || (flowNode.type === "drawing-annotation" ? canvasLayers.annotations.locked : flowNode.type === "accessory" ? canvasLayers.accessories.locked : canvasLayers.nodes.locked) ? undefined : void updateProject((project) => {
         const current = project.harnesses.find((item) => item.id === harness.id);
-        const target = flowNode.type === "drawing-annotation"
-          ? current?.drawingAnnotations?.find((item) => item.id === flowNode.id)
-          : current?.nodes.find((item) => item.id === flowNode.id);
-        if (target) target.position = { x: Math.round(flowNode.position.x), y: Math.round(flowNode.position.y) };
+        const position = { x: Math.round(flowNode.position.x), y: Math.round(flowNode.position.y) };
+        if (flowNode.type === "accessory") {
+          const accessory = current?.accessories.find((item) => item.id === flowNode.data.accessoryId);
+          if (accessory) accessory.drawingPosition = position;
+        } else if (flowNode.type === "drawing-annotation") {
+          const annotation = current?.drawingAnnotations?.find((item) => item.id === flowNode.id);
+          if (annotation) annotation.position = position;
+        } else {
+          const node = current?.nodes.find((item) => item.id === flowNode.id);
+          if (node) node.position = position;
+        }
       })}
       proOptions={{ hideAttribution: false }}
     >
@@ -649,15 +739,15 @@ export function HarnessCanvas({ harnessId, minimapTargetId }: { harnessId?: stri
         {layersOpen && <div className="cad-layer-manager__menu">
           <header><strong>DRAWING LAYERS</strong><span>창별 상태</span></header>
           {canvasLayerIds.map((id) => <div key={id}>
-            <span>{id === "sheet" ? "도면/표" : id === "nodes" ? "하우징/분기" : id === "cables" ? "케이블 외피" : id === "conductors" ? "내선" : "주석/이미지"}</span>
+            <span>{id === "sheet" ? "도면/표" : id === "nodes" ? "하우징/분기" : id === "cables" ? "케이블 외피" : id === "conductors" ? "내선" : id === "accessories" ? "수축튜브/부자재" : "주석/이미지"}</span>
             <button title={`${id} 표시`} className={canvasLayers[id].visible ? "active" : ""} onClick={() => setCanvasLayers((current) => updateCanvasLayer(current, id as CanvasLayerId, "visible"))}>{canvasLayers[id].visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
             <button title={`${id} 잠금`} className={canvasLayers[id].locked ? "active is-locked" : ""} onClick={() => setCanvasLayers((current) => updateCanvasLayer(current, id as CanvasLayerId, "locked"))}>{canvasLayers[id].locked ? <LockKeyhole size={12} /> : <Unlock size={12} />}</button>
           </div>)}
         </div>}
       </Panel>
       {minimapTargetId !== null && (minimapTarget
-        ? createPortal(<MiniMap pannable zoomable nodeColor={(node) => node.id === drawingSheetNodeId ? "transparent" : "var(--accent)"} maskColor="color-mix(in srgb, var(--panel) 75%, transparent)" />, minimapTarget)
-        : <MiniMap pannable zoomable nodeColor={(node) => node.id === drawingSheetNodeId ? "transparent" : "var(--accent)"} maskColor="color-mix(in srgb, var(--panel) 75%, transparent)" />)}
+        ? createPortal(<MiniMap pannable zoomable nodeColor={(node) => node.id === drawingSheetNodeId || node.type === "accessory" ? "transparent" : "var(--accent)"} maskColor="color-mix(in srgb, var(--panel) 75%, transparent)" />, minimapTarget)
+        : <MiniMap pannable zoomable nodeColor={(node) => node.id === drawingSheetNodeId || node.type === "accessory" ? "transparent" : "var(--accent)"} maskColor="color-mix(in srgb, var(--panel) 75%, transparent)" />)}
       <Controls showInteractive={false} />
     </ReactFlow>
     {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems()} onClose={() => setMenu(null)} />}

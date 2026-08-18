@@ -12,7 +12,7 @@ import { Field, IconButton } from "./common";
 
 type SettingsSection = "general" | "editor" | "validation" | "output" | "files" | "recovery" | "quality";
 interface LibraryStatus { directory: string; databasePath: string; partCount: number }
-interface LibraryIntegrity { ok: boolean; message: string; partCount: number; backupCount: number }
+interface LibraryIntegrity { ok: boolean; message: string; partCount: number; assetCount: number; missingAssetCount: number; backupCount: number }
 interface SettingsProfile { version: 1; locale: Locale; theme: "light" | "dark"; uiScale: number; preferences: AppPreferences }
 
 const newId = () => crypto.randomUUID();
@@ -65,15 +65,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const exportLibrary = async () => {
     if (!isTauri()) return;
-    const defaultPath = draft.defaultExportDirectory ? await join(draft.defaultExportDirectory, "HarnessDesigner-Library.sqlite") : "HarnessDesigner-Library.sqlite";
-    const path = await save({ defaultPath, title: "부품 라이브러리 백업", filters: [{ name: "SQLite library", extensions: ["sqlite", "db"] }] });
+    const defaultPath = draft.defaultExportDirectory ? await join(draft.defaultExportDirectory, "HarnessDesigner-Library.hlib") : "HarnessDesigner-Library.hlib";
+    const path = await save({ defaultPath, title: "부품 라이브러리 패키지 내보내기", filters: [{ name: "Harness Designer library", extensions: ["hlib"] }] });
     if (!path) return;
     try { setOperation("라이브러리 백업 중…"); setError(null); await backendInvoke("export_library_database", { path }); }
     catch (reason) { setError(String(reason)); } finally { setOperation(null); }
   };
   const importLibrary = async () => {
     if (!isTauri()) return;
-    const path = await open({ multiple: false, directory: false, defaultPath: draft.defaultImportDirectory || undefined, title: "부품 라이브러리 가져오기", filters: [{ name: "SQLite library", extensions: ["sqlite", "db"] }] });
+    const path = await open({ multiple: false, directory: false, defaultPath: draft.defaultImportDirectory || undefined, title: "부품 라이브러리 패키지 가져오기", filters: [{ name: "Harness Designer library", extensions: ["hlib"] }] });
     if (!path || !window.confirm("현재 라이브러리를 백업한 뒤 선택한 라이브러리로 교체하시겠습니까?")) return;
     try { setOperation("라이브러리 가져오는 중…"); setError(null); setLibrary(await backendInvoke("import_library_database", { path })); await emit("library-changed"); }
     catch (reason) { setError(String(reason)); } finally { setOperation(null); }
@@ -194,11 +194,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         {section === "files" && <SettingsGroup title="파일 및 라이브러리" description="공용 라이브러리 위치, 순환 백업, 무결성을 관리합니다.">
           <PathField label="기본 가져오기 폴더" value={draft.defaultImportDirectory} onChoose={() => void chooseDirectory("defaultImportDirectory")} />
           <PathField label="기본 내보내기 폴더" value={draft.defaultExportDirectory} onChoose={() => void chooseDirectory("defaultExportDirectory")} />
-          <div className="library-location-card"><div><strong>공용 부품 라이브러리</strong><span>{library?.databasePath ?? "경로 확인 중…"}</span><small>{library ? `${library.partCount}개 부품 · SQLite` : ""}</small></div><button onClick={() => void changeLibraryDirectory()} disabled={!!operation}>위치 변경</button></div>
-          <Toggle label="위치 변경 시 기존 라이브러리 복사" description="새 폴더에 parts.db가 없을 때 현재 데이터를 복사합니다." checked={copyExisting} onChange={setCopyExisting} />
+          <div className="library-location-card"><div><strong>외부 부품 라이브러리</strong><span>{library?.databasePath ?? "경로 확인 중…"}</span><small>{library ? `${library.partCount}개 부품 · library.db + assets/` : ""}</small></div><button onClick={() => void changeLibraryDirectory()} disabled={!!operation}>폴더 지정</button></div>
+          <Toggle label="위치 변경 시 기존 라이브러리 복사" description="새 폴더에 library.db가 없을 때 메타데이터와 assets 폴더를 함께 복사합니다." checked={copyExisting} onChange={setCopyExisting} />
+          <div className="settings-note"><strong>외부 라이브러리 구조</strong><span>검색용 메타데이터는 library.db에, STEP과 2D 도면 원본은 assets 폴더에 저장합니다. 폴더 전체를 복사하거나 .hlib로 내보내 다른 PC와 공유할 수 있습니다. NAS 경로를 직접 열기보다 로컬 동기화 폴더를 사용하세요.</span></div>
           <Field label="자동 백업 보관 수"><NumberInput value={draft.libraryBackupRetention} suffix="개" min={0} onChange={(value) => setPreference("libraryBackupRetention", value)} /></Field>
-          <div className="settings-actions"><button onClick={() => void exportLibrary()} disabled={!!operation}>라이브러리 백업 내보내기</button><button onClick={() => void importLibrary()} disabled={!!operation}>라이브러리 가져오기</button><button onClick={() => void checkIntegrity()} disabled={!!operation}>무결성 검사</button></div>
-          {integrity && <div className={integrity.ok ? "settings-success" : "connector-library-error"}>{integrity.ok ? "정상" : "오류"} · 부품 {integrity.partCount}개 · 자동 백업 {integrity.backupCount}개 · {integrity.message}</div>}
+          <div className="settings-actions"><button onClick={() => void exportLibrary()} disabled={!!operation}>.hlib 내보내기</button><button onClick={() => void importLibrary()} disabled={!!operation}>.hlib 가져오기</button><button onClick={() => void checkIntegrity()} disabled={!!operation}>무결성 검사</button></div>
+          {integrity && <div className={integrity.ok ? "settings-success" : "connector-library-error"}>{integrity.ok ? "정상" : "오류"} · 부품 {integrity.partCount}개 · 외부 자산 파일 {integrity.assetCount}개 · 누락 {integrity.missingAssetCount}개 · 자동 백업 {integrity.backupCount}개 · {integrity.message}</div>}
         </SettingsGroup>}
         {section === "recovery" && <SettingsGroup title="저장 및 복구" description="편집 중인 프로젝트의 복구본을 원본과 별도로 보관합니다.">
           <Field label="자동 저장 간격"><select value={draft.autosaveIntervalMinutes} onChange={(event) => setPreference("autosaveIntervalMinutes", Number(event.target.value))}><option value="0">사용 안 함</option><option value="1">1분</option><option value="5">5분</option><option value="10">10분</option><option value="30">30분</option></select></Field>

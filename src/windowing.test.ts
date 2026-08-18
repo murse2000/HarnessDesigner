@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { findDockTarget, isNearDockTarget, openDetachedView, openLibraryWindow } from "./windowing";
+import { findCanvasTabDropTarget, findDockTarget, isNearDockTarget, openDetachedView, openLibraryWindow } from "./windowing";
 
 describe("openLibraryWindow", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -60,5 +60,19 @@ describe("isNearDockTarget", () => {
     expect(findDockTarget("navigator", { x: 900, y: 180, width: 280, height: 500 }, hosts, 24)).toBe("main-b");
     expect(findDockTarget("inspector", { x: 2120, y: 180, width: 280, height: 500 }, hosts, 24)).toBe("main-b");
     expect(findDockTarget("bottom", { x: 1320, y: 820, width: 650, height: 300 }, hosts, 24)).toBe("main-b");
+  });
+});
+
+describe("findCanvasTabDropTarget", () => {
+  const zones = [
+    { label: "main-a", sessionId: "session-1", x: 100, y: 100, width: 800, height: 32 },
+    { label: "main-b", sessionId: "session-1", x: 1000, y: 100, width: 800, height: 32 },
+    { label: "main-c", sessionId: "session-2", x: 1900, y: 100, width: 800, height: 32 },
+  ];
+
+  it("같은 프로젝트의 다른 메인 창 탭 영역만 이동 대상으로 선택한다", () => {
+    expect(findCanvasTabDropTarget({ x: 1200, y: 116 }, zones, "main-a", "session-1")).toBe("main-b");
+    expect(findCanvasTabDropTarget({ x: 300, y: 116 }, zones, "main-a", "session-1")).toBeUndefined();
+    expect(findCanvasTabDropTarget({ x: 2100, y: 116 }, zones, "main-a", "session-1")).toBeUndefined();
   });
 });

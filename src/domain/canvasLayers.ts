@@ -1,6 +1,6 @@
-export const canvasLayerIds = ["sheet", "nodes", "cables", "conductors", "annotations"] as const;
+export const canvasLayerIds = ["sheet", "nodes", "cables", "conductors", "accessories", "annotations"] as const;
 
-export const canvasLayerZIndex = { sheet: 0, cables: 1, conductors: 2 } as const;
+export const canvasLayerZIndex = { sheet: 0, cables: 1, conductors: 2, accessories: 3, labels: 5 } as const;
 
 export type CanvasLayerId = (typeof canvasLayerIds)[number];
 

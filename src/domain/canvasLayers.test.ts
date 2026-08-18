@@ -21,5 +21,7 @@ describe("도면 레이어 상태", () => {
   it("케이블 외피를 도면 템플릿 위와 개별 코어 아래에 표시한다", () => {
     expect(canvasLayerZIndex.sheet).toBeLessThan(canvasLayerZIndex.cables);
     expect(canvasLayerZIndex.cables).toBeLessThan(canvasLayerZIndex.conductors);
+    expect(canvasLayerZIndex.conductors).toBeLessThan(canvasLayerZIndex.accessories);
+    expect(canvasLayerZIndex.accessories).toBeLessThan(canvasLayerZIndex.labels);
   });
 });

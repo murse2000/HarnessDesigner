@@ -7,7 +7,7 @@ describe("3D 씬 탐색기", () => {
     const project = createProject();
     const items = buildThreeSceneItems(project, project.harnesses[0]);
 
-    expect(items.find((item) => item.id === "node-j1")?.detail).toContain("MX150-8P");
+    expect(items.find((item) => item.id === "node-j1")?.detail).toContain("33482-4801");
     expect(items.find((item) => item.id === "seg-1")?.detail).toBe("개별 전선 · 2C · 450 mm");
     expect(items.find((item) => item.id === "acc-label-1")?.detail).toBe("label · 2 ea");
   });

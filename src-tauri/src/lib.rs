@@ -156,12 +156,41 @@ fn export_xlsx(
     )
 }
 
+#[tauri::command]
+fn export_solidworks_routing_package(
+    path: String,
+    entries: Vec<export::RoutingPackageEntry>,
+    from_to_rows: Vec<Vec<String>>,
+    cable_library_rows: Vec<Vec<String>>,
+) -> Result<(), String> {
+    export::write_solidworks_routing_package(
+        &PathBuf::from(path),
+        &entries,
+        &from_to_rows,
+        &cable_library_rows,
+    )
+}
+
 fn app_data_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|error| error.to_string())
 }
 
 fn library_path(app: &AppHandle) -> Result<PathBuf, String> {
     app_settings::library_path(&app_data_path(app)?)
+}
+
+fn prepare_library(app: &AppHandle) -> Result<PathBuf, String> {
+    let path = library_path(app)?;
+    library::initialize(&path)?;
+    #[cfg(desktop)]
+    {
+        let resources = app
+            .path()
+            .resource_dir()
+            .map_err(|error| error.to_string())?;
+        library::seed_builtin_model_assets(&path, &resources.join("parts"))?;
+    }
+    Ok(path)
 }
 
 #[derive(Serialize)]
@@ -188,7 +217,7 @@ fn backup_library(app: &AppHandle, path: &Path) -> Result<(), String> {
 
 #[tauri::command]
 fn get_library_status(app: AppHandle) -> Result<LibraryStatus, String> {
-    let path = library_path(&app)?;
+    let path = prepare_library(&app)?;
     let part_count = library::list(&path)?.len();
     Ok(LibraryStatus {
         directory: path
@@ -209,15 +238,14 @@ fn set_library_directory(
 ) -> Result<LibraryStatus, String> {
     let app_data = app_data_path(&app)?;
     let current =
-        app_settings::library_path(&app_data).unwrap_or_else(|_| app_data.join("parts.db"));
+        app_settings::library_path(&app_data).unwrap_or_else(|_| app_data.join("library.db"));
     let directory = PathBuf::from(directory);
     if !directory.is_dir() {
         return Err("선택한 라이브러리 폴더가 존재하지 않습니다.".into());
     }
-    let target = directory.join("parts.db");
+    let target = directory.join("library.db");
     if copy_existing && current.exists() && current != target && !target.exists() {
-        std::fs::copy(&current, &target)
-            .map_err(|error| format!("기존 라이브러리를 복사할 수 없습니다: {error}"))?;
+        library::copy_package(&current, &target)?;
     }
     library::initialize(&target)?;
     app_settings::set_library_directory(&app_data, &directory)?;
@@ -227,14 +255,8 @@ fn set_library_directory(
 #[tauri::command]
 fn export_library_database(app: AppHandle, path: String) -> Result<(), String> {
     let source = library_path(&app)?;
-    library::initialize(&source)?;
     let target = PathBuf::from(path);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    std::fs::copy(source, target)
-        .map(|_| ())
-        .map_err(|error| format!("라이브러리 백업을 저장할 수 없습니다: {error}"))
+    library::export_package(&source, &target)
 }
 
 #[tauri::command]
@@ -246,36 +268,14 @@ fn import_library_database(app: AppHandle, path: String) -> Result<LibraryStatus
             return get_library_status(app);
         }
     }
-    let temporary = target.with_extension("db.importing");
-    std::fs::copy(&source, &temporary)
-        .map_err(|error| format!("라이브러리 파일을 읽을 수 없습니다: {error}"))?;
-    if let Err(error) = library::list(&temporary) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(format!(
-            "올바른 라이브러리 데이터베이스가 아닙니다: {error}"
-        ));
-    }
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let backup = target.with_file_name(format!("parts-backup-{seconds}.db"));
-    if target.exists() {
-        std::fs::rename(&target, &backup)
-            .map_err(|error| format!("기존 라이브러리를 백업할 수 없습니다: {error}"))?;
-    }
-    if let Err(error) = std::fs::rename(&temporary, &target) {
-        if backup.exists() {
-            let _ = std::fs::rename(&backup, &target);
-        }
-        return Err(format!("가져온 라이브러리를 적용할 수 없습니다: {error}"));
-    }
+    backup_library(&app, &target)?;
+    library::import_package(&source, &target)?;
     get_library_status(app)
 }
 
 #[tauri::command]
 fn list_library_parts(app: AppHandle) -> Result<Vec<PartSnapshot>, String> {
-    library::list(&library_path(&app)?)
+    library::list(&prepare_library(&app)?)
 }
 
 #[tauri::command]
@@ -436,17 +436,93 @@ fn delete_recovery_snapshot(app: AppHandle, path: String) -> Result<(), String> 
         .join("recovery")
         .canonicalize()
         .map_err(|error| error.to_string())?;
-    let target = PathBuf::from(path)
+    delete_recovery_files(&root, &[path])
+}
+
+fn delete_recovery_files(root: &Path, paths: &[String]) -> Result<(), String> {
+    let targets = paths
+        .iter()
+        .map(|path| {
+            let target = PathBuf::from(path)
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if !target.starts_with(root)
+                || target
+                    .extension()
+                    .is_none_or(|extension| extension != "harness")
+            {
+                return Err("복구본 경로가 올바르지 않습니다.".into());
+            }
+            Ok(target)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    for target in targets {
+        std::fs::remove_file(target).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::delete_recovery_files;
+    use std::fs;
+
+    #[test]
+    fn deletes_all_valid_recovery_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("recovery");
+        fs::create_dir(&root).unwrap();
+        let first = root.join("first.harness");
+        let second = root.join("second.harness");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+        let root = root.canonicalize().unwrap();
+
+        delete_recovery_files(
+            &root,
+            &[
+                first.to_string_lossy().to_string(),
+                second.to_string_lossy().to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert!(!first.exists());
+        assert!(!second.exists());
+    }
+
+    #[test]
+    fn validates_every_path_before_deleting_any_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("recovery");
+        fs::create_dir(&root).unwrap();
+        let valid = root.join("valid.harness");
+        let outside = directory.path().join("outside.harness");
+        fs::write(&valid, b"valid").unwrap();
+        fs::write(&outside, b"outside").unwrap();
+        let root = root.canonicalize().unwrap();
+
+        let result = delete_recovery_files(
+            &root,
+            &[
+                valid.to_string_lossy().to_string(),
+                outside.to_string_lossy().to_string(),
+            ],
+        );
+
+        assert!(result.is_err());
+        assert!(valid.exists());
+        assert!(outside.exists());
+    }
+}
+
+#[tauri::command]
+fn delete_recovery_snapshots(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    let root = app_data_path(&app)?
+        .join("recovery")
         .canonicalize()
         .map_err(|error| error.to_string())?;
-    if !target.starts_with(root)
-        || target
-            .extension()
-            .is_none_or(|extension| extension != "harness")
-    {
-        return Err("복구본 경로가 올바르지 않습니다.".into());
-    }
-    std::fs::remove_file(target).map_err(|error| error.to_string())
+    delete_recovery_files(&root, &paths)
 }
 
 #[tauri::command]
@@ -469,11 +545,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ProjectSessionManager::default())
         .setup(|app| {
-            if let Ok(app_data) = app.path().app_data_dir() {
-                if let Ok(path) = app_settings::library_path(&app_data) {
-                    let _ = library::initialize(&path);
-                }
-            }
+            prepare_library(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -489,6 +561,7 @@ pub fn run() {
             write_text_file,
             write_binary_file,
             export_xlsx,
+            export_solidworks_routing_package,
             list_library_parts,
             upsert_library_part,
             get_library_model_asset,
@@ -505,7 +578,8 @@ pub fn run() {
             save_recovery_snapshot,
             list_recovery_snapshots,
             open_recovery_snapshot,
-            delete_recovery_snapshot
+            delete_recovery_snapshot,
+            delete_recovery_snapshots
         ])
         .run(tauri::generate_context!())
         .expect("Harness Designer 실행에 실패했습니다.");

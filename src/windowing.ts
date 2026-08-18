@@ -24,6 +24,27 @@ export interface DockTarget extends WindowRect {
   label: string;
 }
 
+export interface CanvasTabDropZone extends WindowRect {
+  label: string;
+  sessionId: string;
+}
+
+export function findCanvasTabDropTarget(
+  cursor: { x: number; y: number },
+  zones: CanvasTabDropZone[],
+  sourceLabel: string,
+  sessionId: string,
+): string | undefined {
+  return zones.find((zone) =>
+    zone.label !== sourceLabel
+    && zone.sessionId === sessionId
+    && cursor.x >= zone.x
+    && cursor.x <= zone.x + zone.width
+    && cursor.y >= zone.y
+    && cursor.y <= zone.y + zone.height
+  )?.label;
+}
+
 export function isNearDockTarget(panel: DockableView, floating: WindowRect, host: WindowRect, threshold: number): boolean {
   const overlapsX = floating.x + floating.width >= host.x && floating.x <= host.x + host.width;
   const overlapsY = floating.y + floating.height >= host.y && floating.y <= host.y + host.height;
@@ -107,8 +128,8 @@ export async function openDetachedView(sessionId: string, view: ViewKind, option
   const windowHandle = new WebviewWindow(label, {
     url,
     title: `Harness Designer · ${view}`,
-    width: view === "canvas" || view === "threeD" ? 1280 : 980,
-    height: view === "canvas" || view === "threeD" ? 820 : 720,
+    width: view === "canvas" || view === "threeD" || view === "formboard" ? 1280 : 980,
+    height: view === "canvas" || view === "threeD" || view === "formboard" ? 820 : 720,
     minWidth: 520,
     minHeight: 360,
     resizable: true,

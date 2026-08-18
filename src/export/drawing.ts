@@ -1,9 +1,59 @@
-import type { BomRow, DrawingTableKind, HarnessAssembly, Point, ProjectDocument } from "../domain/types";
+import type { BomRow, DrawingTableKind, HarnessAssembly, Point, ProjectDocument, SymbolAsset } from "../domain/types";
+import { buildAccessoryDrawingPlacements } from "../domain/accessoryDrawing";
 import { buildHarnessDrawingSummary } from "../domain/drawingSummary";
-import { buildFormboardLayout } from "../domain/formboard";
+import { buildFormboardLayout, formboardCableGeometry, formboardFanoutPoints, formboardNodeRouteAngle, formboardSegmentPoints } from "../domain/formboard";
+import { resolveFormboardSymbol, resolveFormboardSymbolRouteRotation } from "../domain/formboardSymbol";
 import type { DrawingTemplate } from "../preferences";
+import { getCableRenderSpec } from "../three/cableRendering";
 
 const esc = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const drawingColor = (value?: string) => value?.startsWith("#") ? value : ({ BK: "#26323d", WH: "#d7dde2", RD: "#d23b3b", BU: "#3488c8", GN: "#43a06b", YE: "#d7ad32", OR: "#df7a2d", BR: "#84543b", GY: "#7b8792" }[value?.trim().toUpperCase() ?? ""] ?? "#26323d");
+
+function symbolViewBox(asset: SymbolAsset): [number, number, number, number] | null {
+  const values = asset.viewBox.split(/\s+/).map(Number);
+  return values.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0 ? values as [number, number, number, number] : null;
+}
+
+function symbolInnerSvg(asset: SymbolAsset) {
+  return asset.svg.replace(/^\s*<svg\b[^>]*>/i, "").replace(/<\/svg>\s*$/i, "").replaceAll("currentColor", "#1f4668");
+}
+
+function svgSymbolAt(asset: SymbolAsset, x: number, y: number, maxWidth?: number, maxHeight?: number) {
+  const viewBox = symbolViewBox(asset);
+  if (!viewBox) return "";
+  const [viewX, viewY, width, height] = viewBox;
+  const scale = maxWidth && maxHeight ? Math.min(maxWidth / width, maxHeight / height) : 1;
+  return `<g transform="translate(${x} ${y}) scale(${scale}) translate(${-viewX - width / 2} ${-viewY - height / 2})">${symbolInnerSvg(asset)}</g>`;
+}
+
+function symbolLineSegments(asset: SymbolAsset) {
+  const segments: Array<[number, number, number, number]> = [];
+  for (const match of asset.svg.matchAll(/<line\s+[^>]*x1="([^"]+)"\s+y1="([^"]+)"\s+x2="([^"]+)"\s+y2="([^"]+)"[^>]*\/?\s*>/gi)) {
+    const values = match.slice(1, 5).map(Number);
+    if (values.every(Number.isFinite)) segments.push(values as [number, number, number, number]);
+  }
+  return segments;
+}
+
+function rotatedSize(width: number, height: number, rotationDeg: number) {
+  const radians = rotationDeg * Math.PI / 180;
+  return {
+    width: Math.abs(width * Math.cos(radians)) + Math.abs(height * Math.sin(radians)),
+    height: Math.abs(width * Math.sin(radians)) + Math.abs(height * Math.cos(radians)),
+  };
+}
+
+function rotatePoint(point: Point, rotationDeg: number): Point {
+  const radians = rotationDeg * Math.PI / 180;
+  return {
+    x: point.x * Math.cos(radians) - point.y * Math.sin(radians),
+    y: point.x * Math.sin(radians) + point.y * Math.cos(radians),
+  };
+}
+
+function pushDxfLines(pairs: Array<string | number>, layer: string, points: Point[]) {
+  points.slice(1).forEach((point, index) => pairs.push(0, "LINE", 8, layer, 10, points[index].x, 20, -points[index].y, 30, 0, 11, point.x, 21, -point.y, 31, 0));
+}
 
 function safeImageDataUrl(value?: string): string | undefined {
   return value && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=\s]+$/i.test(value) ? value.replaceAll("\n", "").replaceAll("\r", "") : undefined;
@@ -57,7 +107,9 @@ export function buildHarnessSvg(project: ProjectDocument, harness: HarnessAssemb
   const height = 760;
   const nodes = new Map(harness.nodes.map((node) => [node.id, node]));
   const parts = new Map(project.parts.map((part) => [part.id, part]));
+  const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const summary = buildHarnessDrawingSummary(project, harness);
+  const accessoryPlacements = buildAccessoryDrawingPlacements(harness, project.parts);
   const releaseStatus = harness.releaseStatus === "released" ? "RELEASED" : harness.releaseStatus === "inReview" ? "IN REVIEW" : "DRAFT";
   const segmentSvg = harness.segments.map((segment) => {
     const from = nodes.get(segment.fromNodeId)?.position;
@@ -65,12 +117,23 @@ export function buildHarnessSvg(project: ProjectDocument, harness: HarnessAssemb
     if (!from || !to) return "";
     const midX = (from.x + to.x) / 2;
     const midY = (from.y + to.y) / 2;
-    return `<g><path d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="#203c58" stroke-width="12" fill="none" stroke-linecap="round"/><path d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="#eef3f7" stroke-width="6" fill="none" stroke-dasharray="8 5"/><text x="${midX}" y="${midY - 13}" class="dim" text-anchor="middle">${esc(segment.label)} · ${segment.lengthMm} mm</text></g>`;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
+    const heatShrinkSvg = [[segment.startHeatShrinkPartId, 0.18, "START"], [segment.endHeatShrinkPartId, 0.82, "END"]].flatMap(([partId, ratio, side]) => {
+      const part = parts.get(String(partId ?? ""));
+      if (!part) return [];
+      const x = from.x + (to.x - from.x) * Number(ratio);
+      const y = from.y + (to.y - from.y) * Number(ratio);
+      return [`<g class="heat-shrink" transform="translate(${x} ${y}) rotate(${angle})"><rect x="-12" y="-8" width="24" height="16" rx="3" fill="${drawingColor(part.color)}"/><text x="0" y="-12" text-anchor="middle" transform="rotate(${-angle})" class="accessory-text">${side} HS · ${esc(part.partNumber)}</text></g>`];
+    }).join("");
+    return `<g><path d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="#203c58" stroke-width="12" fill="none" stroke-linecap="round"/><path d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="#eef3f7" stroke-width="6" fill="none" stroke-dasharray="8 5"/>${heatShrinkSvg}<text x="${midX}" y="${midY - 13}" class="dim" text-anchor="middle">${esc(segment.label)} · ${segment.lengthMm} mm</text></g>`;
   }).join("");
   const nodeSvg = harness.nodes.map((node) => {
     const connector = node.kind === "connector";
-    return `<g transform="translate(${node.position.x - 52} ${node.position.y - 34})"><rect width="104" height="68" rx="${connector ? 5 : 34}" fill="#fff" stroke="#1f4668" stroke-width="2"/><rect width="104" height="20" rx="4" fill="#dce8f2"/><text x="52" y="15" text-anchor="middle" class="ref">${esc(node.reference)}</text><text x="52" y="45" text-anchor="middle" class="label">${esc(node.label)}</text><text x="52" y="59" text-anchor="middle" class="meta">${node.pins.length ? `${node.pins.length} PIN` : node.kind.toUpperCase()}</text></g>`;
+    const symbol = assets.get(parts.get(node.partId ?? "")?.symbolAssetId ?? "");
+    const drawing = connector && symbol ? svgSymbolAt(symbol, 52, 39, 82, 30) : "";
+    return `<g transform="translate(${node.position.x - 52} ${node.position.y - 34})"><rect width="104" height="68" rx="${connector ? 5 : 34}" fill="#fff" stroke="#1f4668" stroke-width="2"/><rect width="104" height="20" rx="4" fill="#dce8f2"/><text x="52" y="15" text-anchor="middle" class="ref">${esc(node.reference)}</text>${drawing || `<text x="52" y="45" text-anchor="middle" class="label">${esc(node.label)}</text>`}<text x="52" y="62" text-anchor="middle" class="meta">${node.pins.length ? `${node.pins.length} PIN` : node.kind.toUpperCase()} · ${esc(node.label)}</text></g>`;
   }).join("");
+  const accessorySvg = accessoryPlacements.map((accessory) => `<g class="accessory" transform="translate(${accessory.position.x} ${accessory.position.y})"><rect width="116" height="22" rx="3"/><text x="6" y="8" class="accessory-kind">${esc(accessory.category === "clip" ? "CLAMP / CLIP" : accessory.category.toUpperCase())}</text><text x="6" y="18" class="accessory-text">${esc(accessory.partNumber)} × ${accessory.quantity}</text></g>`).join("");
   const annotationSvg = [...(harness.drawingAnnotations ?? [])].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map(svgDrawingAnnotation).join("");
   const lengthById = new Map(summary.lengths.map((row) => [row.id, row.lengthMm]));
   const pinRows = harness.conductors.slice(0, 5).map((wire, index) => {
@@ -89,11 +152,13 @@ export function buildHarnessSvg(project: ProjectDocument, harness: HarnessAssemb
   const notesTable = svgSummaryTable("NOTES", notesPosition.x, notesPosition.y, 300, ["NO.", "NOTE"], (summary.notes.length ? summary.notes : ["NO NOTES"]).map((note, index) => [String(index + 1), note]), [0, 34]);
   const materialTable = svgSummaryTable("MANUFACTURING SUMMARY", materialPosition.x, materialPosition.y, 360, ["TYPE", "PART NO.", "QTY", "STATUS"], summary.materials.map((row) => [row.type, row.partNumber, `${row.quantity} ${row.unit}`, row.present ? "YES" : "NO"]), [0, 105, 235, 285]);
   const lengthTable = svgSummaryTable("CUT LENGTH", lengthPosition.x, lengthPosition.y, 366, ["REF", "PART NO.", "FROM-TO", "LENGTH"], summary.lengths.map((row) => [row.reference, row.partNumber, `${row.from}-${row.to}`, `${row.lengthMm} mm`]), [0, 65, 175, 280]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#18334c}.title{font-size:19px;font-weight:700}.subtitle{font-size:11px}.ref{font-size:12px;font-weight:700}.label{font-size:10px;font-weight:600}.meta{font-size:8px}.dim{font-size:10px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3px}.table{font-size:8px}.table-head{font-size:7px;font-weight:700}.table-title{font-size:9px;font-weight:700}.table-box{fill:#f8fafc;stroke:#6f879b}.table-line{stroke:#a8bac9;stroke-width:.7}.annotation-box{fill:#fff;stroke:#6f879b}.annotation-label-box{fill:#dce8f2;stroke:#1f668f}.annotation-label{font-size:11px;font-weight:700;fill:#124f74}.annotation-text{font-size:10px}.watermark{font-size:72px;font-weight:700;fill:#d46a6a;opacity:.09}</style><rect width="100%" height="100%" fill="#fff"/><rect x="20" y="20" width="1080" height="720" fill="none" stroke="#172d42" stroke-width="2"/>${releaseStatus === "RELEASED" ? "" : `<text x="560" y="380" text-anchor="middle" class="watermark">${releaseStatus}</text>`}<text x="42" y="53" class="title">${esc(project.projectNumber)} · ${esc(harness.number)} ${esc(harness.name)}</text><text x="42" y="72" class="subtitle">REV ${esc(harness.revision)} · ${releaseStatus} · ${esc(project.name)} · A3 LANDSCAPE · mm</text><line x1="40" y1="90" x2="1080" y2="90" stroke="#a8bac9"/>${segmentSvg}${nodeSvg}${annotationSvg}${notesTable}${materialTable}${lengthTable}<g><rect x="34" y="516" width="740" height="${Math.max(48, harness.conductors.slice(0, 5).length * 18 + 36)}" fill="#f8fafc" stroke="#6f879b"/><text x="42" y="536" class="ref">WIRE</text><text x="115" y="536" class="ref">FROM</text><text x="195" y="536" class="ref">TO</text><text x="275" y="536" class="ref">COLOR</text><text x="320" y="536" class="ref">GAUGE</text><text x="405" y="536" class="ref">LENGTH</text><text x="485" y="536" class="ref">TERMINAL (FROM / TO)</text>${pinRows}</g><g transform="translate(820 665)"><rect width="260" height="60" fill="#fff" stroke="#172d42"/><text x="10" y="20" class="ref">HARNESS DESIGNER</text><text x="10" y="38" class="subtitle">${esc(project.projectNumber)} / ${esc(harness.number)}</text><text x="200" y="38" class="ref">REV ${esc(harness.revision)}</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#18334c}.title{font-size:19px;font-weight:700}.subtitle{font-size:11px}.ref{font-size:12px;font-weight:700}.label{font-size:10px;font-weight:600}.meta{font-size:8px}.dim{font-size:10px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3px}.table{font-size:8px}.table-head{font-size:7px;font-weight:700}.table-title{font-size:9px;font-weight:700}.table-box{fill:#f8fafc;stroke:#6f879b}.table-line{stroke:#a8bac9;stroke-width:.7}.annotation-box{fill:#fff;stroke:#6f879b}.annotation-label-box{fill:#dce8f2;stroke:#1f668f}.annotation-label{font-size:11px;font-weight:700;fill:#124f74}.annotation-text{font-size:10px}.accessory rect{fill:#fff8d8;stroke:#b48a18}.accessory-kind{font-size:6px;font-weight:700}.accessory-text{font-size:8px;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:2px}.heat-shrink rect{stroke:#fff;stroke-width:2px}.watermark{font-size:72px;font-weight:700;fill:#d46a6a;opacity:.09}</style><rect width="100%" height="100%" fill="#fff"/><rect x="20" y="20" width="1080" height="720" fill="none" stroke="#172d42" stroke-width="2"/>${releaseStatus === "RELEASED" ? "" : `<text x="560" y="380" text-anchor="middle" class="watermark">${releaseStatus}</text>`}<text x="42" y="53" class="title">${esc(project.projectNumber)} · ${esc(harness.number)} ${esc(harness.name)}</text><text x="42" y="72" class="subtitle">REV ${esc(harness.revision)} · ${releaseStatus} · ${esc(project.name)} · A3 LANDSCAPE · mm</text><line x1="40" y1="90" x2="1080" y2="90" stroke="#a8bac9"/>${segmentSvg}${nodeSvg}${accessorySvg}${annotationSvg}${notesTable}${materialTable}${lengthTable}<g><rect x="34" y="516" width="740" height="${Math.max(48, harness.conductors.slice(0, 5).length * 18 + 36)}" fill="#f8fafc" stroke="#6f879b"/><text x="42" y="536" class="ref">WIRE</text><text x="115" y="536" class="ref">FROM</text><text x="195" y="536" class="ref">TO</text><text x="275" y="536" class="ref">COLOR</text><text x="320" y="536" class="ref">GAUGE</text><text x="405" y="536" class="ref">LENGTH</text><text x="485" y="536" class="ref">TERMINAL (FROM / TO)</text>${pinRows}</g><g transform="translate(820 665)"><rect width="260" height="60" fill="#fff" stroke="#172d42"/><text x="10" y="20" class="ref">HARNESS DESIGNER</text><text x="10" y="38" class="subtitle">${esc(project.projectNumber)} / ${esc(harness.number)}</text><text x="200" y="38" class="ref">REV ${esc(harness.revision)}</text></g></svg>`;
 }
 
 export function buildHarnessDxf(project: ProjectDocument, harness: HarnessAssembly): string {
   const nodes = new Map(harness.nodes.map((node) => [node.id, node]));
+  const parts = new Map(project.parts.map((part) => [part.id, part]));
+  const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const summary = buildHarnessDrawingSummary(project, harness);
   const pairs: Array<string | number> = [0, "SECTION", 2, "HEADER", 9, "$ACADVER", 1, "AC1032", 0, "ENDSEC", 0, "SECTION", 2, "ENTITIES"];
   for (const segment of harness.segments) {
@@ -102,10 +167,26 @@ export function buildHarnessDxf(project: ProjectDocument, harness: HarnessAssemb
     if (!from || !to) continue;
     pairs.push(0, "LINE", 8, "HARNESS", 10, from.x, 20, -from.y, 30, 0, 11, to.x, 21, -to.y, 31, 0);
     pairs.push(0, "TEXT", 8, "DIMENSIONS", 10, (from.x + to.x) / 2, 20, -(from.y + to.y) / 2 + 12, 40, 8, 1, `${segment.lengthMm} mm`);
+    for (const [partId, ratio, side] of [[segment.startHeatShrinkPartId, 0.18, "START"], [segment.endHeatShrinkPartId, 0.82, "END"]] as const) {
+      const part = partId ? parts.get(partId) : undefined;
+      if (part) pairs.push(0, "TEXT", 8, "ACCESSORIES", 10, from.x + (to.x - from.x) * ratio, 20, -(from.y + (to.y - from.y) * ratio) + 10, 40, 5, 1, `${side} HEAT SHRINK ${part.partNumber}`);
+    }
   }
   for (const node of harness.nodes) {
-    pairs.push(0, "LWPOLYLINE", 8, "CONNECTORS", 90, 4, 70, 1, 10, node.position.x - 50, 20, -node.position.y - 30, 10, node.position.x + 50, 20, -node.position.y - 30, 10, node.position.x + 50, 20, -node.position.y + 30, 10, node.position.x - 50, 20, -node.position.y + 30);
+    const symbol = assets.get(parts.get(node.partId ?? "")?.symbolAssetId ?? "");
+    const viewBox = symbol ? symbolViewBox(symbol) : null;
+    const symbolLines = symbol ? symbolLineSegments(symbol) : [];
+    if (viewBox && symbolLines.length) {
+      const [viewX, viewY, width, height] = viewBox;
+      const scale = Math.min(80 / width, 40 / height);
+      for (const [x1, y1, x2, y2] of symbolLines) pairs.push(0, "LINE", 8, "CONNECTOR_OUTLINE", 10, node.position.x + (x1 - viewX - width / 2) * scale, 20, -node.position.y - (y1 - viewY - height / 2) * scale, 30, 0, 11, node.position.x + (x2 - viewX - width / 2) * scale, 21, -node.position.y - (y2 - viewY - height / 2) * scale, 31, 0);
+    } else {
+      pairs.push(0, "LWPOLYLINE", 8, "CONNECTORS", 90, 4, 70, 1, 10, node.position.x - 50, 20, -node.position.y - 30, 10, node.position.x + 50, 20, -node.position.y - 30, 10, node.position.x + 50, 20, -node.position.y + 30, 10, node.position.x - 50, 20, -node.position.y + 30);
+    }
     pairs.push(0, "TEXT", 8, "LABELS", 10, node.position.x - 35, 20, -node.position.y, 40, 10, 1, `${node.reference} ${node.label}`);
+  }
+  for (const accessory of buildAccessoryDrawingPlacements(harness, project.parts)) {
+    pairs.push(0, "TEXT", 8, "ACCESSORIES", 10, accessory.position.x, 20, -accessory.position.y, 40, 5, 1, `${accessory.category.toUpperCase()} ${accessory.partNumber} x ${accessory.quantity}`);
   }
   for (const annotation of [...(harness.drawingAnnotations ?? [])].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))) {
     if (annotation.kind === "image") {
@@ -144,19 +225,59 @@ export function buildHarnessDxf(project: ProjectDocument, harness: HarnessAssemb
 
 export function buildFormboardDxf(project: ProjectDocument, harness: HarnessAssembly): string {
   const layout = buildFormboardLayout(harness);
+  const partMap = new Map(project.parts.map((part) => [part.id, part]));
+  const symbolMap = new Map(harness.nodes.map((node) => [node.id, resolveFormboardSymbol(project, partMap.get(node.partId ?? ""))]));
   const pairs: Array<string | number> = [0, "SECTION", 2, "HEADER", 9, "$ACADVER", 1, "AC1032", 9, "$INSUNITS", 70, 4, 0, "ENDSEC", 0, "SECTION", 2, "ENTITIES"];
   for (const segment of harness.segments) {
-    const from = layout.nodes[segment.fromNodeId];
-    const to = layout.nodes[segment.toNodeId];
-    if (!from || !to) continue;
-    pairs.push(0, "LINE", 8, "FORMBOARD_1TO1", 10, from.x, 20, -from.y, 30, 0, 11, to.x, 21, -to.y, 31, 0);
-    pairs.push(0, "TEXT", 8, "DIMENSIONS", 10, (from.x + to.x) / 2, 20, -(from.y + to.y) / 2 + 8, 40, 4, 1, `${segment.label} ${segment.lengthMm} mm`);
+    const points = formboardSegmentPoints(layout, segment);
+    if (points.length < 2) continue;
+    const cablePart = partMap.get(segment.cablePartId ?? "");
+    const cableSpec = getCableRenderSpec(cablePart);
+    const cableGeometry = cableSpec ? formboardCableGeometry(points, segment.drawingRoute?.sourceBreakoutLength ?? cableSpec.breakoutLengthMm, segment.drawingRoute?.targetBreakoutLength ?? cableSpec.breakoutLengthMm) : null;
+    if (cableGeometry && cableSpec) {
+      pushDxfLines(pairs, "CABLE_JACKET_1TO1", cableGeometry.jacketPoints);
+      const cableCores = harness.conductors.filter((conductor) => conductor.cableRunId === segment.id);
+      cableCores.forEach((conductor, index) => {
+        const offset = (index - (cableCores.length - 1) / 2) * (cableSpec.coreDiameterMm + 0.8);
+        const layer = `CABLE_CORE_${conductor.color.replace(/[^A-Z0-9]/gi, "_").toUpperCase()}`;
+        pushDxfLines(pairs, layer, formboardFanoutPoints(cableGeometry.sourceFanoutPoints, offset, "source"));
+        pushDxfLines(pairs, layer, formboardFanoutPoints(cableGeometry.targetFanoutPoints, offset, "target"));
+      });
+    } else {
+      pushDxfLines(pairs, "FORMBOARD_1TO1", points);
+    }
+    const labelPoint = points[Math.floor(points.length / 2)];
+    pairs.push(0, "TEXT", 8, "DIMENSIONS", 10, labelPoint.x, 20, -labelPoint.y + 8, 40, 4, 1, `${segment.label} ${segment.lengthMm} mm`);
+    const coverings = [segment.sleevePartId, segment.shieldPartId, segment.tapePartId].flatMap((partId) => partId ? [partMap.get(partId)?.partNumber].filter((value): value is string => Boolean(value)) : []);
+    if (coverings.length) pairs.push(0, "TEXT", 8, "MANUFACTURING", 10, labelPoint.x, 20, -labelPoint.y - 7, 40, 3, 1, coverings.join(" / "));
+    if (segment.startHeatShrinkPartId) pairs.push(0, "TEXT", 8, "MANUFACTURING", 10, points[0].x, 20, -points[0].y + 13, 40, 3, 1, `START HS ${partMap.get(segment.startHeatShrinkPartId)?.partNumber ?? ""}`);
+    if (segment.endHeatShrinkPartId) pairs.push(0, "TEXT", 8, "MANUFACTURING", 10, points.at(-1)!.x, 20, -points.at(-1)!.y + 13, 40, 3, 1, `END HS ${partMap.get(segment.endHeatShrinkPartId)?.partNumber ?? ""}`);
   }
   for (const node of harness.nodes) {
     const point = layout.nodes[node.id];
     if (!point) continue;
-    pairs.push(0, "CIRCLE", 8, "FIXTURES", 10, point.x, 20, -point.y, 30, 0, 40, 5);
+    const part = partMap.get(node.partId ?? "");
+    const symbol = symbolMap.get(node.id);
+    const viewBox = symbol ? symbolViewBox(symbol) : null;
+    const symbolLines = symbol ? symbolLineSegments(symbol) : [];
+    const routeRotation = node.kind === "connector" ? formboardNodeRouteAngle(harness, layout, node.id) ?? 0 : 0;
+    const symbolRotation = resolveFormboardSymbolRouteRotation(symbol, part, routeRotation);
+    if (viewBox && symbolLines.length) {
+      const [viewX, viewY, width, height] = viewBox;
+      for (const [x1, y1, x2, y2] of symbolLines) {
+        const from = rotatePoint({ x: x1 - viewX - width / 2, y: y1 - viewY - height / 2 }, symbolRotation);
+        const to = rotatePoint({ x: x2 - viewX - width / 2, y: y2 - viewY - height / 2 }, symbolRotation);
+        pairs.push(0, "LINE", 8, "CONNECTOR_OUTLINE_1TO1", 10, point.x + from.x, 20, -point.y - from.y, 30, 0, 11, point.x + to.x, 21, -point.y - to.y, 31, 0);
+      }
+    } else {
+      pairs.push(0, "CIRCLE", 8, "FIXTURES", 10, point.x, 20, -point.y, 30, 0, 40, 5);
+    }
     pairs.push(0, "TEXT", 8, "LABELS", 10, point.x + 7, 20, -point.y, 40, 4, 1, `${node.reference} ${node.label}`);
+  }
+  for (const fixture of layout.fixtures) {
+    if (fixture.kind === "peg") pairs.push(0, "CIRCLE", 8, "FORMBOARD_FIXTURES", 10, fixture.position.x, 20, -fixture.position.y, 30, 0, 40, 5);
+    else pairs.push(0, "LWPOLYLINE", 8, "FORMBOARD_FIXTURES", 90, 4, 70, 1, 10, fixture.position.x - 9, 20, -fixture.position.y - 6, 10, fixture.position.x + 9, 20, -fixture.position.y - 6, 10, fixture.position.x + 9, 20, -fixture.position.y + 6, 10, fixture.position.x - 9, 20, -fixture.position.y + 6);
+    pairs.push(0, "TEXT", 8, "FORMBOARD_FIXTURES", 10, fixture.position.x + 7, 20, -fixture.position.y, 40, 3, 1, fixture.label);
   }
   pairs.push(0, "LINE", 8, "CALIBRATION", 10, layout.bounds.minX, 20, -layout.bounds.minY + 35, 30, 0, 11, layout.bounds.minX + 100, 21, -layout.bounds.minY + 35, 31, 0);
   pairs.push(0, "TEXT", 8, "CALIBRATION", 10, layout.bounds.minX, 20, -layout.bounds.minY + 42, 40, 4, 1, "CALIBRATION 100 mm");
@@ -166,6 +287,22 @@ export function buildFormboardDxf(project: ProjectDocument, harness: HarnessAsse
 
 export function buildFormboardSvgPages(project: ProjectDocument, harness: HarnessAssembly, paper: "A3" | "A4", options: { overlapMm?: number; calibrationLengthMm?: number; connectorTables?: boolean } = {}): string[] {
   const layout = buildFormboardLayout(harness);
+  const partMap = new Map(project.parts.map((part) => [part.id, part]));
+  const symbolMap = new Map(harness.nodes.map((node) => [node.id, resolveFormboardSymbol(project, partMap.get(node.partId ?? ""))]));
+  const bounds = { ...layout.bounds };
+  for (const node of harness.nodes) {
+    const point = layout.nodes[node.id];
+    const symbol = symbolMap.get(node.id);
+    const viewBox = symbol ? symbolViewBox(symbol) : null;
+    if (!point || !viewBox) continue;
+    const part = partMap.get(node.partId ?? "");
+    const routeRotation = node.kind === "connector" ? formboardNodeRouteAngle(harness, layout, node.id) ?? 0 : 0;
+    const size = rotatedSize(viewBox[2], viewBox[3], resolveFormboardSymbolRouteRotation(symbol, part, routeRotation));
+    bounds.minX = Math.min(bounds.minX, point.x - size.width / 2);
+    bounds.maxX = Math.max(bounds.maxX, point.x + size.width / 2);
+    bounds.minY = Math.min(bounds.minY, point.y - size.height / 2);
+    bounds.maxY = Math.max(bounds.maxY, point.y + size.height / 2);
+  }
   const [paperWidth, paperHeight] = paper === "A4" ? [297, 210] : [420, 297];
   const margin = 10;
   const titleHeight = 28;
@@ -173,29 +310,69 @@ export function buildFormboardSvgPages(project: ProjectDocument, harness: Harnes
   const contentHeight = paperHeight - margin * 2 - titleHeight;
   const overlap = Math.min(50, Math.max(0, options.overlapMm ?? 10));
   const calibrationLength = Math.min(200, Math.max(10, options.calibrationLengthMm ?? 100));
-  const designWidth = Math.max(1, layout.bounds.maxX - layout.bounds.minX + 40);
-  const designHeight = Math.max(1, layout.bounds.maxY - layout.bounds.minY + 40);
+  const designWidth = Math.max(1, bounds.maxX - bounds.minX + 40);
+  const designHeight = Math.max(1, bounds.maxY - bounds.minY + 40);
   const columns = Math.max(1, Math.ceil(Math.max(0, designWidth - overlap) / (contentWidth - overlap)));
   const rows = Math.max(1, Math.ceil(Math.max(0, designHeight - overlap) / (contentHeight - overlap)));
-  const partMap = new Map(project.parts.map((part) => [part.id, part]));
   const connectorTable = options.connectorTables === false ? "" : `<g transform="translate(${paperWidth - margin - 96} ${margin + 3})"><rect width="92" height="${8 + Math.min(6, harness.nodes.length) * 6}" fill="white" fill-opacity=".92" stroke="#73899b" stroke-width=".4"/><text x="3" y="5" class="table-head">CONNECTOR / PART / PINS</text>${harness.nodes.slice(0, 6).map((node, index) => `<text x="3" y="${11 + index * 6}" class="table-row">${esc(node.reference)} · ${esc(partMap.get(node.partId ?? "")?.partNumber ?? "-")} · ${node.pins.length}P</text>`).join("")}</g>`;
   const geometry = [
     ...harness.segments.map((segment) => {
-      const from = layout.nodes[segment.fromNodeId];
-      const to = layout.nodes[segment.toNodeId];
-      if (!from || !to) return "";
-      const x1 = from.x - layout.bounds.minX + 20;
-      const y1 = from.y - layout.bounds.minY + 20;
-      const x2 = to.x - layout.bounds.minX + 20;
-      const y2 = to.y - layout.bounds.minY + 20;
-      return `<g><path d="M ${x1} ${y1} L ${x2} ${y2}" class="bundle"/><text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2 - 5}" class="dimension" text-anchor="middle">${esc(segment.label)} · ${segment.lengthMm} mm</text></g>`;
+      const points = formboardSegmentPoints(layout, segment);
+      if (points.length < 2) return "";
+      const drawingPoints = points.map((point) => ({ x: point.x - bounds.minX + 20, y: point.y - bounds.minY + 20 }));
+      const labelPoint = drawingPoints[Math.floor(drawingPoints.length / 2)];
+      const cablePart = partMap.get(segment.cablePartId ?? "");
+      const cableSpec = getCableRenderSpec(cablePart);
+      const cableGeometry = cableSpec ? formboardCableGeometry(points, segment.drawingRoute?.sourceBreakoutLength ?? cableSpec.breakoutLengthMm, segment.drawingRoute?.targetBreakoutLength ?? cableSpec.breakoutLengthMm) : null;
+      const cableDrawing = cableGeometry && cableSpec ? (() => {
+        const translated = (path: Point[]) => path.map((point) => ({ x: point.x - bounds.minX + 20, y: point.y - bounds.minY + 20 }));
+        const pathData = (path: Point[]) => path.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" ");
+        const cableCores = harness.conductors.filter((conductor) => conductor.cableRunId === segment.id);
+        const corePaths = cableCores.map((conductor, index) => {
+          const offset = (index - (cableCores.length - 1) / 2) * (cableSpec.coreDiameterMm + 0.8);
+          const source = pathData(translated(formboardFanoutPoints(cableGeometry.sourceFanoutPoints, offset, "source")));
+          const target = pathData(translated(formboardFanoutPoints(cableGeometry.targetFanoutPoints, offset, "target")));
+          const color = drawingColor(conductor.color);
+          return `<path d="${source}" style="fill:none;stroke:#748898;stroke-width:${cableSpec.coreDiameterMm + 0.8};stroke-linecap:round;stroke-linejoin:round"/><path d="${source}" style="fill:none;stroke:${color};stroke-width:${cableSpec.coreDiameterMm};stroke-linecap:round;stroke-linejoin:round"/><path d="${target}" style="fill:none;stroke:#748898;stroke-width:${cableSpec.coreDiameterMm + 0.8};stroke-linecap:round;stroke-linejoin:round"/><path d="${target}" style="fill:none;stroke:${color};stroke-width:${cableSpec.coreDiameterMm};stroke-linecap:round;stroke-linejoin:round"/>`;
+        }).join("");
+        const jacket = pathData(translated(cableGeometry.jacketPoints));
+        return `${corePaths}<path d="${jacket}" style="fill:none;stroke:${drawingColor(cableSpec.jacketColor)};stroke-width:${cableSpec.outerDiameterMm};stroke-linecap:round;stroke-linejoin:round"/>`;
+      })() : `<path d="${drawingPoints.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" ")}" class="bundle"/>`;
+      const coverings = [segment.sleevePartId, segment.shieldPartId, segment.tapePartId].flatMap((partId) => partId ? [partMap.get(partId)?.partNumber].filter((value): value is string => Boolean(value)) : []).join(" · ");
+      const startHeatShrink = segment.startHeatShrinkPartId ? `<text x="${drawingPoints[0].x}" y="${drawingPoints[0].y - 12}" class="manufacturing">START HS · ${esc(partMap.get(segment.startHeatShrinkPartId)?.partNumber ?? "")}</text>` : "";
+      const endPoint = drawingPoints.at(-1)!;
+      const endHeatShrink = segment.endHeatShrinkPartId ? `<text x="${endPoint.x}" y="${endPoint.y - 12}" class="manufacturing" text-anchor="end">END HS · ${esc(partMap.get(segment.endHeatShrinkPartId)?.partNumber ?? "")}</text>` : "";
+      return `<g>${cableDrawing}<text x="${labelPoint.x}" y="${labelPoint.y - 5}" class="dimension" text-anchor="middle">${esc(segment.label)} · ${segment.lengthMm} mm</text>${coverings ? `<text x="${labelPoint.x}" y="${labelPoint.y + 7}" class="manufacturing" text-anchor="middle">${esc(coverings)}</text>` : ""}${startHeatShrink}${endHeatShrink}</g>`;
     }),
     ...harness.nodes.map((node) => {
       const point = layout.nodes[node.id];
       if (!point) return "";
-      const x = point.x - layout.bounds.minX + 20;
-      const y = point.y - layout.bounds.minY + 20;
-      return `<g transform="translate(${x} ${y})"><circle r="5" class="fixture"/><rect x="-12" y="-7" width="24" height="14" rx="2" class="connector"/><text y="-10" text-anchor="middle" class="node-ref">${esc(node.reference)}</text><text y="12" text-anchor="middle" class="node-label">${esc(node.label)}</text></g>`;
+      const x = point.x - bounds.minX + 20;
+      const y = point.y - bounds.minY + 20;
+      const part = partMap.get(node.partId ?? "");
+      const symbol = symbolMap.get(node.id);
+      const viewBox = symbol ? symbolViewBox(symbol) : null;
+      const routeRotation = node.kind === "connector" ? formboardNodeRouteAngle(harness, layout, node.id) ?? 0 : 0;
+      const symbolRotation = resolveFormboardSymbolRouteRotation(symbol, part, routeRotation);
+      const drawing = symbol ? `<g transform="rotate(${symbolRotation})">${svgSymbolAt(symbol, 0, 0)}</g>` : "";
+      const displaySize = viewBox ? rotatedSize(viewBox[2], viewBox[3], symbolRotation) : null;
+      const labelOffset = displaySize ? displaySize.height / 2 + 5 : 12;
+      return `<g transform="translate(${x} ${y})"><circle r="5" class="fixture"/>${drawing || `<rect x="-12" y="-7" width="24" height="14" rx="2" class="connector"/>`}<text y="${-labelOffset}" text-anchor="middle" class="node-ref">${esc(node.reference)}</text><text y="${labelOffset}" text-anchor="middle" class="node-label">${esc(node.label)}</text></g>`;
+    }),
+    ...layout.fixtures.map((fixture) => {
+      const x = fixture.position.x - bounds.minX + 20;
+      const y = fixture.position.y - bounds.minY + 20;
+      return `<g transform="translate(${x} ${y})">${fixture.kind === "peg" ? `<circle r="5" class="fixture"/><path d="M -8 0 H 8 M 0 -8 V 8" class="fixture-line"/>` : `<rect x="-9" y="-6" width="18" height="12" rx="2" class="fixture-clamp"/>`}<text y="-10" text-anchor="middle" class="fixture-label">${esc(fixture.label)}</text></g>`;
+    }),
+    ...harness.accessories.flatMap((accessory) => {
+      const segment = accessory.segmentId ? harness.segments.find((item) => item.id === accessory.segmentId) : undefined;
+      const segmentPoints = segment ? formboardSegmentPoints(layout, segment) : [];
+      const point = accessory.nodeId ? layout.nodes[accessory.nodeId] : segmentPoints[Math.floor(segmentPoints.length / 2)];
+      const part = partMap.get(accessory.partId);
+      if (!point || !part) return [];
+      const x = point.x - bounds.minX + 20;
+      const y = point.y - bounds.minY + 32;
+      return [`<g transform="translate(${x} ${y})"><rect x="-18" y="-5" width="36" height="10" rx="2" class="accessory"/><text y="2" text-anchor="middle" class="fixture-label">${esc(part.partNumber)} × ${accessory.quantity}</text></g>`];
     }),
   ].join("");
   return Array.from({ length: columns * rows }, (_, pageIndex) => {
@@ -206,7 +383,7 @@ export function buildFormboardSvgPages(project: ProjectDocument, harness: Harnes
     const status = harness.releaseStatus === "released" ? "RELEASED" : harness.releaseStatus === "inReview" ? "IN REVIEW" : "DRAFT";
     const cropMarks = `<path d="M ${margin - 3} ${margin} h 6 M ${margin} ${margin - 3} v 6 M ${margin + contentWidth - 3} ${margin} h 6 M ${margin + contentWidth} ${margin - 3} v 6 M ${margin - 3} ${margin + contentHeight} h 6 M ${margin} ${margin + contentHeight - 3} v 6 M ${margin + contentWidth - 3} ${margin + contentHeight} h 6 M ${margin + contentWidth} ${margin + contentHeight - 3} v 6" fill="none" stroke="#172d42" stroke-width=".35"/>`;
     const calibration = `<g transform="translate(${margin + 4} ${paperHeight - margin - titleHeight - 8})"><path d="M 0 0 H ${calibrationLength} M 0 -2 V 2 M ${calibrationLength} -2 V 2" fill="none" stroke="#172d42" stroke-width=".5"/><text x="${calibrationLength / 2}" y="-3" class="meta" text-anchor="middle">CALIBRATION ${calibrationLength} mm</text></g>`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${paperWidth}mm" height="${paperHeight}mm" viewBox="0 0 ${paperWidth} ${paperHeight}"><style>text{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#18334c}.bundle{stroke:#203c58;stroke-width:4;fill:none;stroke-linecap:round}.fixture{fill:#f5a623;stroke:#8b5a00;stroke-width:.6}.connector{fill:#fff;stroke:#1f4668;stroke-width:.8}.dimension{font-size:3.5px;font-weight:700;paint-order:stroke;stroke:white;stroke-width:1.6px}.node-ref{font-size:3.8px;font-weight:700}.node-label{font-size:3px}.title{font-size:4.2px;font-weight:700}.meta{font-size:3px}.table-head{font-size:2.7px;font-weight:700}.table-row{font-size:2.6px}</style><defs><clipPath id="formboard-page-${pageIndex}"><rect x="${margin}" y="${margin}" width="${contentWidth}" height="${contentHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="white"/><rect x="5" y="5" width="${paperWidth - 10}" height="${paperHeight - 10}" fill="none" stroke="#172d42" stroke-width=".6"/>${cropMarks}<g clip-path="url(#formboard-page-${pageIndex})" transform="translate(${margin - tileX} ${margin - tileY})">${geometry}</g>${connectorTable}${calibration}<g transform="translate(${margin} ${paperHeight - margin - titleHeight + 2})"><rect width="${contentWidth}" height="${titleHeight - 2}" fill="white" stroke="#172d42" stroke-width=".5"/><text x="4" y="7" class="title">${esc(project.projectNumber)} · ${esc(harness.number)} · ${esc(harness.name)}</text><text x="4" y="14" class="meta">FORMBOARD SCALE 1:1 · ${paper} LANDSCAPE · mm · ${status}</text><text x="4" y="21" class="meta">REV ${esc(harness.revision)} · PAGE ${pageIndex + 1}/${columns * rows} · TILE ${column + 1},${row + 1} · OVERLAP ${overlap} mm</text><text x="${contentWidth - 4}" y="14" text-anchor="end" class="meta">PRINT AT 100%</text></g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${paperWidth}mm" height="${paperHeight}mm" viewBox="0 0 ${paperWidth} ${paperHeight}"><style>text{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#18334c}.bundle{stroke:#203c58;stroke-width:4;fill:none;stroke-linecap:round;stroke-linejoin:round}.fixture{fill:#f5a623;stroke:#8b5a00;stroke-width:.6}.fixture-line{fill:none;stroke:#8b5a00;stroke-width:.5}.fixture-clamp,.accessory{fill:#fff1cf;stroke:#8b5a00;stroke-width:.6}.fixture-label{font-size:2.7px;font-weight:700}.manufacturing{fill:#9b5d0a;font-size:2.7px;font-weight:700;paint-order:stroke;stroke:white;stroke-width:1.2px}.connector{fill:#fff;stroke:#1f4668;stroke-width:.8}.dimension{font-size:3.5px;font-weight:700;paint-order:stroke;stroke:white;stroke-width:1.6px}.node-ref{font-size:3.8px;font-weight:700}.node-label{font-size:3px}.title{font-size:4.2px;font-weight:700}.meta{font-size:3px}.table-head{font-size:2.7px;font-weight:700}.table-row{font-size:2.6px}</style><defs><clipPath id="formboard-page-${pageIndex}"><rect x="${margin}" y="${margin}" width="${contentWidth}" height="${contentHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="white"/><rect x="5" y="5" width="${paperWidth - 10}" height="${paperHeight - 10}" fill="none" stroke="#172d42" stroke-width=".6"/>${cropMarks}<g clip-path="url(#formboard-page-${pageIndex})" transform="translate(${margin - tileX} ${margin - tileY})">${geometry}</g>${connectorTable}${calibration}<g transform="translate(${margin} ${paperHeight - margin - titleHeight + 2})"><rect width="${contentWidth}" height="${titleHeight - 2}" fill="white" stroke="#172d42" stroke-width=".5"/><text x="4" y="7" class="title">${esc(project.projectNumber)} · ${esc(harness.number)} · ${esc(harness.name)}</text><text x="4" y="14" class="meta">FORMBOARD SCALE 1:1 · ${paper} LANDSCAPE · mm · ${status}</text><text x="4" y="21" class="meta">REV ${esc(harness.revision)} · PAGE ${pageIndex + 1}/${columns * rows} · TILE ${column + 1},${row + 1} · OVERLAP ${overlap} mm</text><text x="${contentWidth - 4}" y="14" text-anchor="end" class="meta">PRINT AT 100%</text></g></svg>`;
   });
 }
 

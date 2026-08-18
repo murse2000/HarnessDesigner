@@ -13,7 +13,7 @@ interface ProjectState {
   snapshot: SessionSnapshot | null;
   activeHarnessId: string | null;
   selectedEntityId: string | null;
-  selectedEntityType: "node" | "segment" | "conductor" | "annotation" | null;
+  selectedEntityType: "node" | "segment" | "conductor" | "accessory" | "annotation" | null;
   locale: Locale;
   theme: "light" | "dark";
   uiScale: number;
@@ -22,6 +22,7 @@ interface ProjectState {
   busy: boolean;
   error: string | null;
   connectorPicker: { mode: "add" | "replace"; nodeId?: string; partId?: string } | null;
+  accessoryPicker: { partId?: string } | null;
   pinMapEditor: { wireId?: string; duplicate?: boolean; preset?: PinConnectionPreset } | null;
   cableRunEditor: { segmentId?: string } | null;
   initialize: (sessionId?: string) => Promise<void>;
@@ -30,7 +31,7 @@ interface ProjectState {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   setActiveHarness: (id: string) => void;
-  selectEntity: (id: string | null, type?: "node" | "segment" | "conductor" | "annotation") => void;
+  selectEntity: (id: string | null, type?: "node" | "segment" | "conductor" | "accessory" | "annotation") => void;
   setLocale: (locale: Locale) => void;
   setTheme: (theme: "light" | "dark") => void;
   setUiScale: (scale: number) => void;
@@ -40,6 +41,8 @@ interface ProjectState {
   clearError: () => void;
   openConnectorPicker: (mode?: "add" | "replace", nodeId?: string, partId?: string) => void;
   closeConnectorPicker: () => void;
+  openAccessoryPicker: (partId?: string) => void;
+  closeAccessoryPicker: () => void;
   openPinMapEditor: (wireId?: string, duplicate?: boolean, preset?: PinConnectionPreset) => void;
   closePinMapEditor: () => void;
   openCableRunEditor: (segmentId?: string) => void;
@@ -70,6 +73,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   busy: false,
   error: null,
   connectorPicker: null,
+  accessoryPicker: null,
   pinMapEditor: null,
   cableRunEditor: null,
 
@@ -87,7 +91,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         eventCleanup = await listen<SessionSnapshot>(`project-changed:${snapshot.sessionId}`, ({ payload }) => {
           get().setSnapshot(payload);
         });
-        selectionCleanup = await listen<{ id: string | null; type: "node" | "segment" | "conductor" | "annotation" | null }>(`selection-changed:${snapshot.sessionId}`, ({ payload }) => {
+        selectionCleanup = await listen<{ id: string | null; type: "node" | "segment" | "conductor" | "accessory" | "annotation" | null }>(`selection-changed:${snapshot.sessionId}`, ({ payload }) => {
           set({ selectedEntityId: payload.id, selectedEntityType: payload.type });
         });
         preferencesCleanup = await listen<AppSettingsEvent>("app-settings-changed", ({ payload }) => {
@@ -181,6 +185,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearError: () => set({ error: null }),
   openConnectorPicker: (mode = "add", nodeId, partId) => set({ connectorPicker: { mode, nodeId, partId } }),
   closeConnectorPicker: () => set({ connectorPicker: null }),
+  openAccessoryPicker: (partId) => set({ accessoryPicker: { partId } }),
+  closeAccessoryPicker: () => set({ accessoryPicker: null }),
   openPinMapEditor: (wireId, duplicate = false, preset) => set({ pinMapEditor: { wireId, duplicate, preset } }),
   closePinMapEditor: () => set({ pinMapEditor: null }),
   openCableRunEditor: (segmentId) => set({ cableRunEditor: { segmentId } }),

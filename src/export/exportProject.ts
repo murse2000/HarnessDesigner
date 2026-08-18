@@ -8,6 +8,7 @@ import { validateProject } from "../domain/validation";
 import { backendInvoke, isTauri } from "../platform";
 import { activeDrawingTemplate, activeOutputFormats, activeValidationRules, loadAppPreferences } from "../preferences";
 import { latestHarnessRelease } from "../domain/release";
+import { formboardSegmentMetrics } from "../domain/formboard";
 import { buildCostRows, buildCostSummary, buildEquipmentRows, buildSystemNetlist, projectForVariant, rowsToDelimited } from "../domain/production";
 import { buildBomSvgPages, buildFormboardDxf, buildFormboardSvgPages, buildHarnessDxf, buildHarnessSvg, buildWorkInstructionSvgPages, svgToCanvas } from "./drawing";
 
@@ -68,6 +69,10 @@ export async function exportProject(project: ProjectDocument): Promise<string> {
   }
   const blockingIssues = validateProject(outputProject, activeValidationRules(preferences)).filter((issue) => issue.severity === "error");
   if (blockingIssues.length) throw new Error(`출력을 차단하는 검증 오류가 ${blockingIssues.length}개 있습니다.`);
+  const invalidFormboards = outputProject.harnesses.flatMap((harness) => harness.formboard
+    ? formboardSegmentMetrics(harness).filter((metric) => !metric.valid || !metric.bendClearanceValid).map((metric) => `${harness.number}:${metric.segmentId}`)
+    : []);
+  if (invalidFormboards.length) throw new Error(`폼보드 제조 길이 또는 굽힘 조건을 확인하세요: ${invalidFormboards.join(", ")}`);
   if (!isTauri()) throw new Error("일괄 출력은 데스크톱 앱에서 사용할 수 있습니다.");
   if (!Object.values(formats).some(Boolean)) throw new Error("환경설정에서 하나 이상의 출력 형식을 선택하세요.");
   const directory = await open({ directory: true, multiple: false, defaultPath: preferences.defaultExportDirectory || undefined, title: "출력 폴더 선택" });

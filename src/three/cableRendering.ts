@@ -35,6 +35,39 @@ function positiveNumber(value: string | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseAwg(gauge: string) {
+  const normalized = gauge.trim().toUpperCase().replace(/\s*AWG$/, "").replace(/\s/g, "");
+  if (!normalized) return null;
+  const aught = normalized.match(/^([1-4])\/0$/);
+  if (aught) return 1 - Number(aught[1]);
+  if (/^0{1,4}$/.test(normalized)) return 1 - normalized.length;
+  const parsed = Number(normalized);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 40 ? parsed : null;
+}
+
+export function getWireRenderDiameterMm(part: PartSnapshot | undefined, gauge: string) {
+  const registeredDiameter = part?.category === "wire"
+    ? positiveNumber(part.attributes.outerDiameterMm ?? part.attributes.diameterMm)
+    : null;
+  if (registeredDiameter) return registeredDiameter;
+  const awg = parseAwg(gauge || part?.gauge || "");
+  if (awg === null) return 2.3;
+  return 0.127 * Math.pow(92, (36 - awg) / 39);
+}
+
+export function getIndividualWireOffsets(diametersMm: number[]): CoreOffset[] {
+  const diameters = diametersMm.map((diameter) => Number.isFinite(diameter) && diameter > 0 ? diameter : 0);
+  if (!diameters.length) return [];
+  const gapMm = Math.max(...diameters) * 0.25;
+  const totalWidthMm = diameters.reduce((sum, diameter) => sum + diameter, 0) + gapMm * (diameters.length - 1);
+  let cursorMm = -totalWidthMm / 2;
+  return diameters.map((diameter) => {
+    const offset = { x: cursorMm + diameter / 2, y: cursorMm + diameter / 2 };
+    cursorMm += diameter + gapMm;
+    return offset;
+  });
+}
+
 export function getCableRenderSpec(part: PartSnapshot | undefined): CableRenderSpec | null {
   if (!part || part.category !== "cable" || !part.color?.trim()) return null;
   const coreCount = positiveNumber(part.attributes.coreCount);

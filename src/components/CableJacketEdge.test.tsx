@@ -106,4 +106,17 @@ describe("CableJacketEdge", () => {
     expect(onRoutePreview).toHaveBeenCalledWith("cable-1", { offsetX: 0, offsetY: 0, sourceBreakoutLength: 60 });
     expect(onRouteCommit).toHaveBeenCalledWith("cable-1", { offsetX: 0, offsetY: 0, sourceBreakoutLength: 60 });
   });
+
+  it("지정된 양단 수축튜브와 외장재를 케이블 위에 표시한다", () => {
+    const props = {
+      id: "cable-1", sourceX: 0, sourceY: 0, targetX: 300, targetY: 0, label: "CBL-001",
+      data: { entityType: "segment", locked: false, breakoutDisplayLength: 20, route: { offsetX: 0, offsetY: 0 }, gridSnap: false, gridSize: 10, onSelect: vi.fn(), onEdit: vi.fn(), onContextMenu: vi.fn(), onRoutePreview: vi.fn(), onRouteCommit: vi.fn(), onRouteCancel: vi.fn(), heatShrink: { source: { partNumber: "RNF-START", color: "#222222" }, target: { partNumber: "RNF-END", color: "#222222" } }, coverings: ["SLEEVE · SLV-08"] },
+    } as unknown as Parameters<typeof CableJacketEdge>[0];
+    const { container } = render(<CableJacketEdge {...props} />);
+
+    expect(container.querySelectorAll(".harness-cable-heat-shrink")).toHaveLength(2);
+    expect(screen.getByText("HS · RNF-START")).toBeInTheDocument();
+    expect(screen.getByText("HS · RNF-END")).toBeInTheDocument();
+    expect(screen.getByText("SLEEVE · SLV-08")).toBeInTheDocument();
+  });
 });

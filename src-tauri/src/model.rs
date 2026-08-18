@@ -10,6 +10,14 @@ pub struct Point {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Point3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PartSnapshot {
     pub id: String,
     #[serde(default)]
@@ -80,6 +88,8 @@ pub struct PinDefinition {
     pub number: String,
     pub name: String,
     pub position: Point,
+    #[serde(default)]
+    pub three_d_connection_offset: Option<Point3>,
     pub terminal_part_id: Option<String>,
     pub seal_part_id: Option<String>,
 }
@@ -93,6 +103,10 @@ pub struct HarnessNode {
     pub label: String,
     pub part_id: Option<String>,
     pub position: Point,
+    #[serde(default)]
+    pub three_d_position: Option<Point3>,
+    #[serde(default)]
+    pub three_d_rotation: Option<Point3>,
     #[serde(default)]
     pub pins: Vec<PinDefinition>,
 }
@@ -332,6 +346,16 @@ pub struct AccessoryPlacement {
     pub segment_id: Option<String>,
     #[serde(default)]
     pub node_id: Option<String>,
+    #[serde(default)]
+    pub drawing_position: Option<Point>,
+    #[serde(default)]
+    pub drawing_width: Option<f64>,
+    #[serde(default)]
+    pub drawing_height: Option<f64>,
+    #[serde(default)]
+    pub three_d_offset: Option<Point3>,
+    #[serde(default)]
+    pub three_d_rotation: Option<Point3>,
     pub note: String,
 }
 
@@ -358,6 +382,28 @@ pub struct HarnessAssembly {
     pub drawing_table_offsets: HashMap<String, Point>,
     #[serde(default)]
     pub drawing_annotations: Vec<DrawingAnnotation>,
+    #[serde(default)]
+    pub formboard: Option<FormboardLayoutState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormboardLayoutState {
+    #[serde(default)]
+    pub node_positions: HashMap<String, Point>,
+    #[serde(default)]
+    pub segment_routes: HashMap<String, Vec<Point>>,
+    #[serde(default)]
+    pub fixtures: Vec<FormboardFixture>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormboardFixture {
+    pub id: String,
+    pub kind: String,
+    pub position: Point,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,7 +617,56 @@ pub struct ContinuityTestResultExportRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{Conductor, HarnessAssembly, HarnessSegment};
+    use super::{
+        AccessoryPlacement, Conductor, HarnessAssembly, HarnessNode, HarnessSegment, PinDefinition,
+    };
+
+    #[test]
+    fn pin_three_d_connection_offset_round_trip_and_legacy_default() {
+        let json = r#"{"id":"p1","number":"1","name":"VCC","position":{"x":0,"y":0},"threeDConnectionOffset":{"x":5,"y":2,"z":-1},"terminalPartId":null,"sealPartId":null}"#;
+        let pin: PinDefinition = serde_json::from_str(json).unwrap();
+        assert_eq!(pin.three_d_connection_offset.as_ref().unwrap().x, 5.0);
+        assert!(serde_json::to_string(&pin)
+            .unwrap()
+            .contains("\"threeDConnectionOffset\":{\"x\":5.0,\"y\":2.0,\"z\":-1.0}"));
+
+        let legacy: PinDefinition = serde_json::from_str(
+            &json.replace(",\"threeDConnectionOffset\":{\"x\":5,\"y\":2,\"z\":-1}", ""),
+        )
+        .unwrap();
+        assert!(legacy.three_d_connection_offset.is_none());
+    }
+
+    #[test]
+    fn harness_node_three_d_position_round_trip_and_legacy_default() {
+        let json = r#"{"id":"j1","kind":"connector","reference":"J1","label":"MAIN","partId":null,"position":{"x":100,"y":200},"threeDPosition":{"x":125,"y":45,"z":-80},"threeDRotation":{"x":15,"y":30,"z":45},"pins":[]}"#;
+        let node: HarnessNode = serde_json::from_str(json).unwrap();
+        assert_eq!(node.three_d_position.as_ref().unwrap().z, -80.0);
+        assert_eq!(node.three_d_rotation.as_ref().unwrap().y, 30.0);
+        assert!(serde_json::to_string(&node)
+            .unwrap()
+            .contains("\"threeDRotation\":{\"x\":15.0,\"y\":30.0,\"z\":45.0}"));
+
+        let legacy: HarnessNode = serde_json::from_str(
+            &json.replace(",\"threeDRotation\":{\"x\":15,\"y\":30,\"z\":45}", ""),
+        )
+        .unwrap();
+        assert!(legacy.three_d_rotation.is_none());
+    }
+
+    #[test]
+    fn accessory_three_d_offset_round_trip_and_legacy_default() {
+        let json = r#"{"id":"label-1","partId":"label","quantity":1,"threeDOffset":{"x":12,"y":-4,"z":8},"threeDRotation":{"x":0,"y":90,"z":0},"note":""}"#;
+        let accessory: AccessoryPlacement = serde_json::from_str(json).unwrap();
+        assert_eq!(accessory.three_d_offset.as_ref().unwrap().x, 12.0);
+        assert_eq!(accessory.three_d_rotation.as_ref().unwrap().y, 90.0);
+
+        let legacy: AccessoryPlacement = serde_json::from_str(
+            &json.replace(",\"threeDRotation\":{\"x\":0,\"y\":90,\"z\":0}", ""),
+        )
+        .unwrap();
+        assert!(legacy.three_d_rotation.is_none());
+    }
 
     #[test]
     fn harness_drawing_notes_round_trip_and_legacy_default() {
@@ -580,6 +675,7 @@ mod tests {
         assert!(legacy_harness.drawing_notes.is_empty());
         assert!(legacy_harness.drawing_table_offsets.is_empty());
         assert!(legacy_harness.drawing_annotations.is_empty());
+        assert!(legacy_harness.formboard.is_none());
 
         let json = r#"{"id":"h1","number":"HNS-001","name":"Harness","revision":"A","drawingNotes":"체결 확인\n연속성 검사","drawingTableOffsets":{"notes":{"x":20,"y":10}},"drawingAnnotations":[{"id":"a1","kind":"label","text":"검사 완료","position":{"x":120,"y":80},"width":140,"height":36}]}"#;
         let harness: HarnessAssembly = serde_json::from_str(json).unwrap();
@@ -595,6 +691,19 @@ mod tests {
         assert!(serde_json::to_string(&harness)
             .unwrap()
             .contains("drawingAnnotations"));
+    }
+
+    #[test]
+    fn formboard_round_trip_and_legacy_default() {
+        let json = r#"{"id":"h1","number":"HNS-001","name":"Harness","revision":"A","formboard":{"nodePositions":{"j1":{"x":10,"y":20}},"segmentRoutes":{"s1":[{"x":30,"y":40}]},"fixtures":[{"id":"f1","kind":"peg","position":{"x":50,"y":60},"label":"P1"}]}}"#;
+        let harness: HarnessAssembly = serde_json::from_str(json).unwrap();
+        let formboard = harness.formboard.as_ref().unwrap();
+        assert_eq!(formboard.node_positions["j1"].x, 10.0);
+        assert_eq!(formboard.segment_routes["s1"][0].y, 40.0);
+        assert_eq!(formboard.fixtures[0].kind, "peg");
+        assert!(serde_json::to_string(&harness)
+            .unwrap()
+            .contains("nodePositions"));
     }
 
     #[test]

@@ -10,6 +10,8 @@ import { backendInvoke, isTauri } from "../platform";
 import { loadAppPreferences } from "../preferences";
 import { useProjectStore } from "../store/projectStore";
 import { hydrateLibraryModelAsset } from "../three/modelAssetHydration";
+import { getModelPlacement } from "../three/modelPlacement";
+import { createStepProjectionSymbol, type StepProjectionView } from "../three/stepProjection";
 import { CadImportDialog } from "./CadImportDialog";
 import { IconButton } from "./common";
 import { PartRegistrationDialog } from "./PartRegistrationDialog";
@@ -170,8 +172,9 @@ export function ConnectorLibraryDialog() {
     const harness = snapshot.project.harnesses.find((item) => item.id === activeHarnessId);
     if (!harness) return;
     const clampPart = selectedClampId ? compatibleClamps.find((item) => item.id === selectedClampId) ?? null : null;
-    let modelAsset: ModelAsset | null = null;
-    let symbolAsset: SymbolAsset | null = null;
+    let resolvedPart = part;
+    let modelAsset: ModelAsset | null = snapshot.project.modelAssets.find((item) => item.id === part.modelAssetId) ?? null;
+    let symbolAsset: SymbolAsset | null = snapshot.project.assets.find((item) => item.id === part.symbolAssetId) ?? null;
     if (part.modelAssetId && !snapshot.project.modelAssets.some((item) => item.id === part.modelAssetId) && isTauri()) {
       try {
         modelAsset = await backendInvoke<ModelAsset | null>("get_library_model_asset", { assetId: part.modelAssetId });
@@ -189,6 +192,22 @@ export function ConnectorLibraryDialog() {
         return;
       }
     }
+    if (!part.symbolAssetId && modelAsset) {
+      const savedView = part.attributes.stepProjectionView;
+      const view: StepProjectionView = savedView === "back" || savedView === "left" || savedView === "right" || savedView === "top" || savedView === "bottom" ? savedView : "front";
+      try {
+        symbolAsset = createStepProjectionSymbol(modelAsset, view, getModelPlacement(part).scale);
+        resolvedPart = { ...part, symbolAssetId: symbolAsset.id, attributes: { ...part.attributes, stepProjectionView: view }, sourceLibraryRevision: (part.sourceLibraryRevision ?? 0) + 1 };
+        if (isTauri()) {
+          await backendInvoke("upsert_library_symbol_asset", { asset: symbolAsset });
+          await backendInvoke("upsert_library_part", { part: resolvedPart });
+        }
+        setLibraryParts((current) => current.map((item) => item.id === part.id ? resolvedPart : item));
+      } catch (reason) {
+        setError(`STEP 2D 도면을 생성하지 못했습니다: ${String(reason)}`);
+        return;
+      }
+    }
     if (connectorPicker.mode === "replace" && connectorPicker.nodeId) {
       const node = harness.nodes.find((item) => item.id === connectorPicker.nodeId);
       if (!node) return;
@@ -201,13 +220,13 @@ export function ConnectorLibraryDialog() {
       }
       const newNumbers = new Set(pins.map((pin) => pin.number));
       if (groups.some((group) => !newNumbers.has(group.oldPinNumber))) {
-        setPendingRemap({ part, clampPart, pins, modelAsset, symbolAsset, groups });
+        setPendingRemap({ part: resolvedPart, clampPart, pins, modelAsset, symbolAsset, groups });
         return;
       }
-      await commitPart(part, clampPart, pins, modelAsset, symbolAsset, groups);
+      await commitPart(resolvedPart, clampPart, pins, modelAsset, symbolAsset, groups);
       return;
     }
-    await commitPart(part, clampPart, pins, modelAsset, symbolAsset);
+    await commitPart(resolvedPart, clampPart, pins, modelAsset, symbolAsset);
   };
 
   const pendingErrors = pendingRemap ? connectorRemapErrors(pendingRemap.groups, pendingRemap.pins, [...snapshot.project.parts, ...libraryParts]) : [];

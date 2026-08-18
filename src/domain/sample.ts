@@ -3,8 +3,8 @@ import type { HarnessAssembly, PartSnapshot, ProjectDocument } from "./types";
 const now = new Date().toISOString();
 
 export const sampleParts: PartSnapshot[] = [
-  { id: "part-housing-8", name: "MX150 8핀 방수 하우징", partNumber: "MX150-8P", manufacturer: "Molex", description: "8 circuit sealed housing", revision: "A", category: "housing", unit: "ea", attributes: { cavities: "8", compatibleTerminalPartIds: "[\"part-terminal\"]", defaultTerminalPartId: "part-terminal" } },
-  { id: "part-housing-4", name: "DT 4핀 리셉터클", partNumber: "DT04-4P", manufacturer: "TE Connectivity", description: "4 position receptacle", revision: "A", category: "housing", unit: "ea", attributes: { cavities: "4", compatibleTerminalPartIds: "[\"part-terminal\"]", defaultTerminalPartId: "part-terminal" } },
+  { id: "part-housing-8", name: "MX150 8핀 플러그 하우징", partNumber: "33482-4801", manufacturer: "Molex", description: "3.50 mm pitch, sealed 8 circuit plug housing", revision: "CATALOG", category: "housing", unit: "ea", attributes: { cavities: "8", compatibleTerminalPartIds: "[\"part-terminal\"]", defaultTerminalPartId: "part-terminal" }, modelAssetId: "builtin-model-molex-334824801" },
+  { id: "part-housing-4", name: "PicoBlade 4핀 리셉터클 하우징", partNumber: "51021-0400", manufacturer: "Molex", description: "1.25 mm pitch, 4 circuit receptacle housing", revision: "CATALOG", category: "housing", unit: "ea", attributes: { cavities: "4", compatibleTerminalPartIds: "[\"part-terminal\"]", defaultTerminalPartId: "part-terminal" }, modelAssetId: "builtin-model-molex-510210400" },
   { id: "part-terminal", partNumber: "TERM-20", manufacturer: "Generic", description: "20 AWG female terminal", revision: "A", category: "terminal", unit: "ea", attributes: {} },
   { id: "part-seal", partNumber: "SEAL-20", manufacturer: "Generic", description: "20 AWG wire seal", revision: "A", category: "seal", unit: "ea", attributes: {} },
   { id: "part-wire-red", partNumber: "TXL-20-RD", manufacturer: "Champlain", description: "TXL automotive wire", revision: "A", category: "wire", unit: "m", color: "RD", gauge: "20 AWG", attributes: { outerDiameterMm: "2.2" } },
@@ -30,7 +30,7 @@ export const sampleHarness: HarnessAssembly = {
   releaseStatus: "draft",
   nodes: [
     { id: "node-j1", kind: "connector", reference: "J1", label: "MAIN PCB", partId: "part-housing-8", position: { x: 100, y: 170 }, pins: pins("j1", 8) },
-    { id: "node-sp1", kind: "splice", reference: "SP1", label: "SIGNAL SPLICE", position: { x: 420, y: 220 }, pins: [] },
+    { id: "node-sp1", kind: "junction", reference: "BR1", label: "BRANCH POINT", position: { x: 420, y: 220 }, pins: [] },
     { id: "node-j2", kind: "connector", reference: "J2", label: "FRONT SENSOR", partId: "part-housing-4", position: { x: 720, y: 100 }, pins: pins("j2", 4) },
     { id: "node-j3", kind: "connector", reference: "J3", label: "REAR SENSOR", partId: "part-housing-4", position: { x: 720, y: 340 }, pins: pins("j3", 4) },
   ],

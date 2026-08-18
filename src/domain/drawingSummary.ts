@@ -2,7 +2,7 @@ import { buildBom, buildCutList } from "./calculations";
 import type { HarnessAssembly, PartCategory, ProjectDocument, QuantityUnit } from "./types";
 
 export interface DrawingMaterialRow {
-  type: "TERMINAL" | "CLAMP / CLIP" | "LABEL";
+  type: "TERMINAL" | "CLAMP / CLIP" | "LABEL" | "HEAT SHRINK" | "SLEEVE" | "SHIELD" | "TAPE" | "SEAL" | "LUG";
   partNumber: string;
   quantity: number;
   unit: QuantityUnit;
@@ -28,6 +28,12 @@ const materialTypes: Array<{ category: PartCategory; type: DrawingMaterialRow["t
   { category: "terminal", type: "TERMINAL" },
   { category: "clip", type: "CLAMP / CLIP" },
   { category: "label", type: "LABEL" },
+  { category: "heatShrink", type: "HEAT SHRINK" },
+  { category: "sleeve", type: "SLEEVE" },
+  { category: "shield", type: "SHIELD" },
+  { category: "tape", type: "TAPE" },
+  { category: "seal", type: "SEAL" },
+  { category: "lug", type: "LUG" },
 ];
 
 export function buildHarnessDrawingSummary(project: ProjectDocument, harness: HarnessAssembly): HarnessDrawingSummary {

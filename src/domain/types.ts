@@ -85,6 +85,7 @@ export interface PinDefinition {
   number: string;
   name: string;
   position: Point;
+  threeDConnectionOffset?: { x: number; y: number; z: number };
   terminalPartId?: Id;
   sealPartId?: Id;
 }
@@ -100,6 +101,8 @@ export interface HarnessNode {
   label: string;
   partId?: Id;
   position: Point;
+  threeDPosition?: { x: number; y: number; z: number };
+  threeDRotation?: { x: number; y: number; z: number };
   pins: PinDefinition[];
 }
 
@@ -251,6 +254,11 @@ export interface AccessoryPlacement {
   quantity: number;
   segmentId?: Id;
   nodeId?: Id;
+  drawingPosition?: Point;
+  drawingWidth?: number;
+  drawingHeight?: number;
+  threeDOffset?: { x: number; y: number; z: number };
+  threeDRotation?: { x: number; y: number; z: number };
   note: string;
 }
 
@@ -275,6 +283,21 @@ export interface DrawingAnnotation {
   strokeColor?: string;
 }
 
+export type FormboardFixtureKind = "peg" | "clamp";
+
+export interface FormboardFixture {
+  id: Id;
+  kind: FormboardFixtureKind;
+  position: Point;
+  label: string;
+}
+
+export interface FormboardLayoutState {
+  nodePositions: Record<Id, Point>;
+  segmentRoutes: Record<Id, Point[]>;
+  fixtures: FormboardFixture[];
+}
+
 export interface HarnessAssembly {
   id: Id;
   number: string;
@@ -288,6 +311,7 @@ export interface HarnessAssembly {
   drawingNotes?: string;
   drawingTableOffsets?: DrawingTableOffsets;
   drawingAnnotations?: DrawingAnnotation[];
+  formboard?: FormboardLayoutState;
 }
 
 export interface HarnessReleaseRecord {
@@ -345,6 +369,7 @@ export type ViewKind =
   | "bottom"
   | "library"
   | "preview"
+  | "formboard"
   | "threeD";
 
 export interface SessionSnapshot {

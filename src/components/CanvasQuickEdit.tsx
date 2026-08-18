@@ -5,7 +5,9 @@ import { Field, IconButton } from "./common";
 
 export type CanvasQuickEditTarget =
   | { kind: "node"; id: string; reference: string; label: string }
+  | { kind: "pin"; id: string; nodeId: string; nodeReference: string; number: string; name: string }
   | { kind: "segment"; id: string; label: string; lengthMm: number }
+  | { kind: "accessoryLabel"; id: string; text: string }
   | { kind: "annotation"; id: string; annotationKind: DrawingAnnotationKind; text: string; width: number; height: number; fillColor?: string; strokeColor?: string };
 
 export function CanvasQuickEdit({ target, x, y, onCancel, onSave }: {
@@ -29,9 +31,13 @@ export function CanvasQuickEdit({ target, x, y, onCancel, onSave }: {
       setError("구간명과 0보다 큰 실제 길이를 입력하세요.");
       return;
     }
+    if (draft.kind === "accessoryLabel" && !draft.text.trim()) {
+      setError("라벨 텍스트를 입력하세요.");
+      return;
+    }
     onSave(draft);
   };
-  const title = draft.kind === "node" ? "도면 부품 직접 편집" : draft.kind === "segment" ? "구간 직접 편집" : "도면 주석 직접 편집";
+  const title = draft.kind === "node" ? "도면 부품 직접 편집" : draft.kind === "pin" ? "핀 이름 직접 편집" : draft.kind === "segment" ? "구간 직접 편집" : draft.kind === "accessoryLabel" ? "라벨 텍스트 직접 편집" : "도면 주석 직접 편집";
   const left = Math.max(8, Math.min(x + 8, window.innerWidth - 330));
   const top = Math.max(8, Math.min(y + 8, window.innerHeight - 310));
 
@@ -51,10 +57,15 @@ export function CanvasQuickEdit({ target, x, y, onCancel, onSave }: {
         <Field label="참조명"><input autoFocus value={draft.reference} onChange={(event) => { setDraft({ ...draft, reference: event.target.value }); setError(""); }} /></Field>
         <Field label="표시명"><input value={draft.label} onChange={(event) => { setDraft({ ...draft, label: event.target.value }); setError(""); }} /></Field>
       </>}
+      {draft.kind === "pin" && <>
+        <Field label="핀"><input value={`${draft.nodeReference} · ${draft.number}`} readOnly /></Field>
+        <Field label="핀 이름"><input autoFocus value={draft.name} placeholder="예: SIGNAL_1" onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+      </>}
       {draft.kind === "segment" && <>
         <Field label="구간명"><input autoFocus value={draft.label} onChange={(event) => { setDraft({ ...draft, label: event.target.value }); setError(""); }} /></Field>
         <Field label="실제 길이"><span className="canvas-quick-edit__number"><input type="number" min="1" value={draft.lengthMm} onChange={(event) => { setDraft({ ...draft, lengthMm: Number(event.target.value) }); setError(""); }} /><em>mm</em></span></Field>
       </>}
+      {draft.kind === "accessoryLabel" && <Field label="라벨 텍스트"><input autoFocus value={draft.text} onChange={(event) => { setDraft({ ...draft, text: event.target.value }); setError(""); }} /></Field>}
       {draft.kind === "annotation" && <>
         {!['rectangle', 'ellipse', 'arrow'].includes(draft.annotationKind) && <Field label={draft.annotationKind === "image" ? "설명" : "내용"}><textarea autoFocus rows={3} value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") submit(event); }} /></Field>}
         <Field label="크기"><span className="canvas-quick-edit__size"><input aria-label="너비" type="number" min="40" max="1200" value={draft.width} onChange={(event) => setDraft({ ...draft, width: Math.max(40, Number(event.target.value)) })} /><b>×</b><input aria-label="높이" type="number" min="24" max="800" value={draft.height} onChange={(event) => setDraft({ ...draft, height: Math.max(24, Number(event.target.value)) })} /></span></Field>

@@ -12,7 +12,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { partCategories as categories } from "../domain/partCategories";
 import {
   createDrawingPreview,
@@ -47,6 +47,7 @@ import { backendInvoke, isTauri } from "../platform";
 import { loadAppPreferences } from "../preferences";
 import { useProjectStore } from "../store/projectStore";
 import { importStepAsset } from "../three/stepImport";
+import { createStepProjectionSymbol, type StepProjectionView } from "../three/stepProjection";
 import {
   defaultModelPlacement,
   getModelPlacement,
@@ -57,6 +58,7 @@ import { Field, IconButton } from "./common";
 import { CableDefinitionEditor } from "./CableDefinitionEditor";
 import { ModelPlacementControls } from "./ModelPlacementControls";
 import { Part3DPreview } from "./ThreeDView";
+import { WireColorSelect } from "./WireColorSelect";
 import {
   assetDropZoneAtPoint,
   type AssetDropZone,
@@ -70,6 +72,15 @@ interface NewTerminal {
   revision: string;
   wireRange: string;
   maxConductors: string;
+}
+
+function symbolPinStyle(asset: SymbolAsset, pin: PinDefinition) {
+  const [x, y, width, height] = asset.viewBox.split(/\s+/).map(Number);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return { display: "none" };
+  return {
+    left: `${((pin.position.x - x) / width) * 100}%`,
+    top: `${((pin.position.y - y) / height) * 100}%`,
+  };
 }
 
 export function PartRegistrationDialog({
@@ -154,6 +165,12 @@ export function PartRegistrationDialog({
   );
   const [newTerminals, setNewTerminals] = useState<NewTerminal[]>([]);
   const [modelAsset, setModelAsset] = useState<ModelAsset | null>(null);
+  const [drawingAsset, setDrawingAsset] = useState<SymbolAsset | null>(null);
+  const [projectionView, setProjectionView] = useState<StepProjectionView>(() => {
+    const saved = editingPart?.attributes.stepProjectionView;
+    return saved === "back" || saved === "left" || saved === "right" || saved === "top" || saved === "bottom" ? saved : "front";
+  });
+  const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<PartPreview | null>(
     editingPart?.preview?.kind === "photo" ? editingPart.preview : null,
   );
@@ -162,6 +179,7 @@ export function PartRegistrationDialog({
   );
   const [previewChanged, setPreviewChanged] = useState(false);
   const [modelChanged, setModelChanged] = useState(false);
+  const [drawingChanged, setDrawingChanged] = useState(false);
   const [modelPlacement, setModelPlacement] = useState<ModelPlacement>(() =>
     editingPart ? getModelPlacement(editingPart) : { ...defaultModelPlacement },
   );
@@ -178,6 +196,7 @@ export function PartRegistrationDialog({
   const [saving, setSaving] = useState(false);
   const photoDropRef = useRef<HTMLDivElement>(null);
   const modelDropRef = useRef<HTMLDivElement>(null);
+  const drawingMapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -193,6 +212,13 @@ export function PartRegistrationDialog({
     );
     if (projectAsset) {
       setModelAsset(projectAsset);
+      if (!editingPart.symbolAssetId) {
+        const generated = createStepProjectionSymbol(projectAsset, projectionView, modelPlacement.scale);
+        setDrawingAsset(generated);
+        setDrawingPreview(createDrawingPreview(generated));
+        setDrawingChanged(true);
+        setDrawingState(`${generated.sourceName} · 저장 대기`);
+      }
       setModelState(
         `${projectAsset.sourceName} · ${projectAsset.meshes.length} meshes`,
       );
@@ -205,6 +231,13 @@ export function PartRegistrationDialog({
       .then(async (asset) => {
         const hydrated = asset ? await hydrateLibraryModelAsset(asset) : null;
         setModelAsset(hydrated);
+        if (hydrated && !editingPart.symbolAssetId) {
+          const generated = createStepProjectionSymbol(hydrated, projectionView, modelPlacement.scale);
+          setDrawingAsset(generated);
+          setDrawingPreview(createDrawingPreview(generated));
+          setDrawingChanged(true);
+          setDrawingState(`${generated.sourceName} · 저장 대기`);
+        }
         setModelState(
           hydrated
             ? `${hydrated.sourceName} · ${hydrated.meshes.length} meshes`
@@ -223,6 +256,7 @@ export function PartRegistrationDialog({
       (asset) => asset.id === editingPart.symbolAssetId,
     );
     if (projectAsset) {
+      setDrawingAsset(projectAsset);
       setDrawingPreview(createDrawingPreview(projectAsset));
       setDrawingState(projectAsset.sourceName);
       return;
@@ -232,6 +266,7 @@ export function PartRegistrationDialog({
       assetId: editingPart.symbolAssetId,
     })
       .then((asset) => {
+        setDrawingAsset(asset);
         setDrawingPreview(asset ? createDrawingPreview(asset) : null);
         setDrawingState(
           asset ? asset.sourceName : "등록된 2D 도면을 찾지 못했습니다.",
@@ -408,15 +443,19 @@ export function PartRegistrationDialog({
         sourceName,
         loadAppPreferences().stepImportQuality,
       );
+      const generatedDrawing = editingPart?.symbolAssetId
+        ? null
+        : createStepProjectionSymbol(asset, projectionView, modelPlacement.scale, drawingAsset?.id);
       if (autoSave && editingPart) {
         setSaving(true);
         const updatedPart: PartSnapshot = {
           ...editingPart,
           attributes: saveModelPlacement(
-            editingPart.attributes,
+            { ...editingPart.attributes, stepProjectionView: projectionView },
             modelPlacement,
           ),
           modelAssetId: asset.id,
+          symbolAssetId: generatedDrawing?.id ?? editingPart.symbolAssetId,
           preview:
             editingPart.preview?.kind === "photo"
               ? editingPart.preview
@@ -425,11 +464,18 @@ export function PartRegistrationDialog({
             (editingPart.sourceLibraryRevision ?? 0) + 1,
         };
         await backendInvoke("upsert_library_model_asset", { asset });
+        if (generatedDrawing) await backendInvoke("upsert_library_symbol_asset", { asset: generatedDrawing });
         await backendInvoke("upsert_library_part", { part: updatedPart });
         onSaved?.([updatedPart]);
       }
       setModelAsset(asset);
       setModelChanged(!autoSave || !editingPart);
+      if (generatedDrawing) {
+        setDrawingAsset(generatedDrawing);
+        setDrawingPreview(createDrawingPreview(generatedDrawing));
+        setDrawingChanged(!autoSave || !editingPart);
+        setDrawingState(`${generatedDrawing.sourceName}${autoSave && editingPart ? " · 자동 저장됨" : " · 저장 대기"}`);
+      }
       setModelState(
         `${sourceName} · ${asset.meshes.length} meshes${autoSave && editingPart ? " · 자동 저장됨" : ""}`,
       );
@@ -513,6 +559,32 @@ export function PartRegistrationDialog({
       ],
     });
     if (path) await loadPhotoPath(path, false);
+  };
+
+  const regenerateStepDrawing = (view: StepProjectionView) => {
+    setProjectionView(view);
+    if (!modelAsset) return;
+    try {
+      const asset = createStepProjectionSymbol(modelAsset, view, modelPlacement.scale, drawingAsset?.id ?? editingPart?.symbolAssetId);
+      setDrawingAsset(asset);
+      setDrawingPreview(createDrawingPreview(asset));
+      setDrawingChanged(true);
+      setDrawingState(`${asset.sourceName} · 저장 대기`);
+      setError(null);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  };
+
+  const mapSelectedPin = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!drawingAsset || !selectedPinId) return;
+    const bounds = drawingMapRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const [viewX, viewY, viewWidth, viewHeight] = drawingAsset.viewBox.split(/\s+/).map(Number);
+    if (![viewX, viewY, viewWidth, viewHeight].every(Number.isFinite) || viewWidth <= 0 || viewHeight <= 0) return;
+    const x = viewX + ((event.clientX - bounds.left) / bounds.width) * viewWidth;
+    const y = viewY + ((event.clientY - bounds.top) / bounds.height) * viewHeight;
+    setPins((current) => current.map((pin) => pin.id === selectedPinId ? { ...pin, position: { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 } } : pin));
   };
 
   const savePart = async () => {
@@ -690,8 +762,10 @@ export function PartRegistrationDialog({
       attributes.finishedDiameterMm = String(Number(finishedDiameterMm));
       attributes.lengthMm = String(Number(heatShrinkLengthMm));
     }
-    if (modelAsset || editingPart?.modelAssetId)
+    if (modelAsset || editingPart?.modelAssetId) {
+      attributes.stepProjectionView = projectionView;
       attributes = saveModelPlacement(attributes, modelPlacement);
+    }
     const preview = previewChanged
       ? (photoPreview ??
         (modelAsset ? createModelPreview(modelAsset) : undefined))
@@ -714,7 +788,7 @@ export function PartRegistrationDialog({
           : gauge.trim() || undefined,
       attributes,
       preview,
-      symbolAssetId: editingPart?.symbolAssetId,
+      symbolAssetId: drawingAsset?.id ?? editingPart?.symbolAssetId,
       modelAssetId: modelAsset?.id ?? editingPart?.modelAssetId,
       sourceLibraryRevision: editingPart
         ? (editingPart.sourceLibraryRevision ?? 0) + 1
@@ -732,6 +806,10 @@ export function PartRegistrationDialog({
           await backendInvoke("upsert_library_model_asset", {
             asset: modelAsset,
           });
+        if (drawingAsset && (drawingChanged || !editingPart))
+          await backendInvoke("upsert_library_symbol_asset", {
+            asset: drawingAsset,
+          });
         await backendInvoke("upsert_library_part", { part });
       }
       if (!editingPart) {
@@ -745,6 +823,11 @@ export function PartRegistrationDialog({
             !project.modelAssets.some((item) => item.id === modelAsset.id)
           )
             project.modelAssets.push(structuredClone(modelAsset));
+          if (
+            drawingAsset &&
+            !project.assets.some((item) => item.id === drawingAsset.id)
+          )
+            project.assets.push(structuredClone(drawingAsset));
           project.parts.push(structuredClone(part));
         });
       }
@@ -857,10 +940,18 @@ export function PartRegistrationDialog({
             )}
             {["wire", "cable", "heatShrink"].includes(category) && (
               <Field label={category === "cable" ? "Jacket Color" : "Color"}>
-                <input
-                  value={color}
-                  onChange={(event) => setColor(event.target.value)}
-                />
+                {category === "cable" ? (
+                  <WireColorSelect
+                    ariaLabel="외피 색상"
+                    value={color}
+                    onChange={setColor}
+                  />
+                ) : (
+                  <input
+                    value={color}
+                    onChange={(event) => setColor(event.target.value)}
+                  />
+                )}
               </Field>
             )}
             {category === "cable" && (
@@ -999,6 +1090,10 @@ export function PartRegistrationDialog({
             <div className="drawing-registration">
               <div>
                 <h3>2D 도면</h3>
+                {modelAsset && <select aria-label="STEP 2D 투영 방향" value={projectionView} onChange={(event) => regenerateStepDrawing(event.target.value as StepProjectionView)}>
+                  <option value="front">정면</option><option value="back">후면</option><option value="left">좌측</option><option value="right">우측</option><option value="top">상면</option><option value="bottom">하면</option>
+                </select>}
+                {modelAsset && <button type="button" onClick={() => regenerateStepDrawing(projectionView)}>STEP에서 생성</button>}
                 {drawingUrl && (
                   <a href={drawingUrl} target="_blank" rel="noreferrer">
                     <ExternalLink size={11} />
@@ -1006,10 +1101,13 @@ export function PartRegistrationDialog({
                   </a>
                 )}
               </div>
-              {drawingPreview ? (
-                <div>
-                  <img src={drawingPreview.dataUrl} alt="등록된 2D 도면 미리보기" />
+              {drawingAsset ? (
+                <div className="step-drawing-map" ref={drawingMapRef} onClick={mapSelectedPin}>
+                  <div dangerouslySetInnerHTML={{ __html: drawingAsset.svg }} />
+                  {category === "housing" && pins.map((pin) => <button type="button" key={pin.id} className={selectedPinId === pin.id ? "is-selected" : ""} style={symbolPinStyle(drawingAsset, pin)} title={`핀 ${pin.number} 위치 매핑`} onClick={(event) => { event.stopPropagation(); setSelectedPinId(pin.id); }}>{pin.number}</button>)}
                 </div>
+              ) : drawingPreview ? (
+                <div><img src={drawingPreview.dataUrl} alt="등록된 2D 도면 미리보기" /></div>
               ) : drawingUrl ? (
                 <a
                   className="drawing-resource"
@@ -1029,6 +1127,7 @@ export function PartRegistrationDialog({
                   {drawingState ?? drawingPreview?.sourceName}
                 </small>
               )}
+              {drawingAsset && category === "housing" && <div className="step-pin-mapping"><label>핀 매핑<select value={selectedPinId ?? ""} onChange={(event) => setSelectedPinId(event.target.value || null)}><option value="">핀 선택</option>{pins.map((pin) => <option key={pin.id} value={pin.id}>{pin.number} · {pin.name || "PIN"}</option>)}</select></label><span>{selectedPinId ? "도면에서 해당 핀 위치를 클릭하세요." : "핀을 선택하면 STEP 도면 위에 접속점을 배치할 수 있습니다."}</span></div>}
             </div>
             <div
               ref={modelDropRef}
