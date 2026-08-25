@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { pinConductorCapacity, pinConductorUsage, pinHasConductorCapacity, terminalConductorCapacity } from "./pinCapacity";
 
 describe("터미널 전선 수용량", () => {
@@ -8,7 +8,7 @@ describe("터미널 전선 수용량", () => {
   });
 
   it("더블 크림프 터미널은 같은 핀에 두 가닥을 허용한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const terminal = project.parts.find((part) => part.id === "part-terminal")!;
     terminal.attributes.maxConductors = "2";

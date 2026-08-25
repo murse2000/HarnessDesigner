@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildFormboardLayout, createFormboardState, fitFormboardSegmentRoute, formboardCableGeometry, formboardNodeRouteAngle, formboardSegmentMetrics } from "./formboard";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 
 describe("1:1 폼보드 배치", () => {
   it("각 번들의 도면 길이를 등록된 제조 길이와 일치시킨다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     const layout = buildFormboardLayout(harness);
 
     for (const segment of harness.segments) {
@@ -15,7 +15,7 @@ describe("1:1 폼보드 배치", () => {
   });
 
   it("저장된 노드와 경로점으로 폼보드 길이 오차를 계산한다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     harness.formboard = createFormboardState(harness);
     harness.formboard.nodePositions["node-sp1"] = { x: 200, y: 0 };
     const from = harness.formboard.nodePositions["node-j1"];
@@ -32,7 +32,7 @@ describe("1:1 폼보드 배치", () => {
   });
 
   it("양 끝 커넥터에서 케이블 쪽을 향하는 인입 각도를 계산한다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     harness.segments = [harness.segments[0]];
     harness.formboard = createFormboardState(harness);
     harness.formboard.nodePositions[harness.segments[0].fromNodeId] = { x: 0, y: 0 };
@@ -44,7 +44,7 @@ describe("1:1 폼보드 배치", () => {
   });
 
   it("여러 경로가 직접 연결된 노드는 자동 회전하지 않는다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     const layout = buildFormboardLayout(harness);
 
     expect(formboardNodeRouteAngle(harness, layout, "node-sp1")).toBeNull();

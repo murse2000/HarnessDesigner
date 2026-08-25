@@ -1,4 +1,4 @@
-import type { HarnessAssembly, HarnessSegment } from "../domain/types";
+import type { Conductor, HarnessAssembly, HarnessSegment } from "../domain/types";
 
 export interface HarnessPoint3 {
   x: number;
@@ -48,12 +48,49 @@ export function getCompactCoilLayout(cableLengthMm: number, displayLengthMm: num
   return { turns, radiusMm };
 }
 
+export function conductorRouteConnectsEndpoints(harness: HarnessAssembly, conductor: Conductor) {
+  const routeIds = new Set(conductor.routeSegmentIds);
+  const connected = new Map<string, string[]>();
+  for (const segment of harness.segments.filter((item) => routeIds.has(item.id))) {
+    connected.set(segment.fromNodeId, [...(connected.get(segment.fromNodeId) ?? []), segment.toNodeId]);
+    connected.set(segment.toNodeId, [...(connected.get(segment.toNodeId) ?? []), segment.fromNodeId]);
+  }
+  const visited = new Set([conductor.from.nodeId]);
+  const queue = [conductor.from.nodeId];
+  while (queue.length) {
+    const nodeId = queue.shift()!;
+    if (nodeId === conductor.to.nodeId) return true;
+    for (const adjacentId of connected.get(nodeId) ?? []) {
+      if (visited.has(adjacentId)) continue;
+      visited.add(adjacentId);
+      queue.push(adjacentId);
+    }
+  }
+  return false;
+}
+
+export function directWireConductors(harness: HarnessAssembly) {
+  return harness.conductors.filter((conductor) => !conductor.cableRunId && !conductorRouteConnectsEndpoints(harness, conductor));
+}
+
+export function directWireLengthMm(harness: HarnessAssembly, conductor: Conductor) {
+  if (conductor.overrideLengthMm && conductor.overrideLengthMm > 0) return conductor.overrideLengthMm;
+  const routeIds = new Set(conductor.routeSegmentIds);
+  const routedLength = harness.segments.filter((segment) => routeIds.has(segment.id)).reduce((sum, segment) => sum + segment.lengthMm, 0);
+  return routedLength > 0 ? routedLength : 100;
+}
+
 export function layoutHarnessNodes(harness: HarnessAssembly, maxSegmentDisplayLengthMm?: number): Map<string, HarnessPoint3> {
   const nodes = new Map(harness.nodes.map((node) => [node.id, node]));
   const connected = new Map<string, { otherId: string; lengthMm: number }[]>();
   for (const segment of harness.segments) {
     connected.set(segment.fromNodeId, [...(connected.get(segment.fromNodeId) ?? []), { otherId: segment.toNodeId, lengthMm: segment.lengthMm }]);
     connected.set(segment.toNodeId, [...(connected.get(segment.toNodeId) ?? []), { otherId: segment.fromNodeId, lengthMm: segment.lengthMm }]);
+  }
+  for (const conductor of directWireConductors(harness)) {
+    const lengthMm = directWireLengthMm(harness, conductor);
+    connected.set(conductor.from.nodeId, [...(connected.get(conductor.from.nodeId) ?? []), { otherId: conductor.to.nodeId, lengthMm }]);
+    connected.set(conductor.to.nodeId, [...(connected.get(conductor.to.nodeId) ?? []), { otherId: conductor.from.nodeId, lengthMm }]);
   }
 
   const positions = new Map<string, HarnessPoint3>();

@@ -2,7 +2,8 @@ import * as THREE from "three";
 import type { HarnessAssembly, ModelAsset, ModelMesh, PartSnapshot, ProjectDocument } from "../domain/types";
 import { getCableRenderSpec, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan } from "../three/cableRendering";
 import { getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, type HarnessPoint3 } from "../three/harnessLayout";
-import { defaultModelPlacement, getModelPlacement, type ModelCableAxis, type ModelPlacement } from "../three/modelPlacement";
+import { defaultModelPlacement, getModelPlacement, modelInletDirection, type ModelPlacement } from "../three/modelPlacement";
+import { buildInletCurve } from "../three/pinConnections";
 
 export interface CadRoute {
   id: string;
@@ -35,13 +36,9 @@ function stepText(value: string) {
   return value.replaceAll("'", "''");
 }
 
-function cableAxisVector(axis: ModelCableAxis) {
-  if (axis === "+x") return new THREE.Vector3(1, 0, 0);
-  if (axis === "-x") return new THREE.Vector3(-1, 0, 0);
-  if (axis === "+y") return new THREE.Vector3(0, 1, 0);
-  if (axis === "-y") return new THREE.Vector3(0, -1, 0);
-  if (axis === "-z") return new THREE.Vector3(0, 0, -1);
-  return new THREE.Vector3(0, 0, 1);
+function inletDirectionVector(placement: ModelPlacement) {
+  const direction = modelInletDirection(placement);
+  return new THREE.Vector3(direction.x, direction.y, direction.z);
 }
 
 function meshGeometry(mesh: ModelMesh) {
@@ -63,16 +60,14 @@ function modelGroup(asset: ModelAsset, scaleMultiplier: number) {
   return group;
 }
 
-function placeConnectorVisual(visual: THREE.Object3D, placement: ModelPlacement, cableDirection: THREE.Vector3) {
-  const direction = cableDirection.clone().normalize();
-  const localAxis = cableAxisVector(placement.cableAxis);
+function placeConnectorVisual(visual: THREE.Object3D, placement: ModelPlacement) {
+  const direction = inletDirectionVector(placement);
   const size = new THREE.Box3().setFromObject(visual, true).getSize(new THREE.Vector3());
-  const halfExtent = Math.abs(localAxis.x) * size.x / 2 + Math.abs(localAxis.y) * size.y / 2 + Math.abs(localAxis.z) * size.z / 2;
-  visual.position.sub(localAxis.multiplyScalar(halfExtent).add(new THREE.Vector3(placement.offsetX, placement.offsetY, placement.offsetZ)));
+  const halfExtent = Math.abs(direction.x) * size.x / 2 + Math.abs(direction.y) * size.y / 2 + Math.abs(direction.z) * size.z / 2;
+  visual.position.sub(direction.clone().multiplyScalar(halfExtent).add(new THREE.Vector3(placement.offsetX, placement.offsetY, placement.offsetZ)));
   const root = new THREE.Group();
-  const alignment = new THREE.Quaternion().setFromUnitVectors(cableAxisVector(placement.cableAxis), direction);
   const roll = new THREE.Quaternion().setFromAxisAngle(direction, THREE.MathUtils.degToRad(placement.rollDeg));
-  root.quaternion.copy(roll.multiply(alignment));
+  root.quaternion.copy(roll);
   root.add(visual);
   return root;
 }
@@ -101,17 +96,19 @@ function objectMeshes(root: THREE.Object3D, name: string) {
   return meshes;
 }
 
-function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number, route: HarnessAssembly["segments"][number]["threeDRoute"]) {
+type ConnectionPort = { direction: THREE.Vector3; straightLeadMm: number };
+
+function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number, route: HarnessAssembly["segments"][number]["threeDRoute"], startPort?: ConnectionPort, endPort?: ConnectionPort) {
   if (route?.controlPoints.length) {
-    const points = [start, ...[...route.controlPoints].sort((left, right) => left.t - right.t).map((point) => {
+    const points = [...route.controlPoints].sort((left, right) => left.t - right.t).map((point) => {
       const position = positionHarnessRoutePoint(start, end, point);
       return new THREE.Vector3(position.x, position.y, position.z);
-    }), end];
-    return new THREE.CatmullRomCurve3(points, false, "centripetal");
+    });
+    return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm, points);
   }
   const axis = end.clone().sub(start);
   const coil = getCompactCoilLayout(cableLengthMm, axis.length());
-  if (!coil) return new THREE.LineCurve3(start, end);
+  if (!coil) return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm);
   const direction = axis.clone().normalize();
   const reference = Math.abs(direction.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
   const basisX = new THREE.Vector3().crossVectors(direction, reference).normalize();
@@ -124,7 +121,7 @@ function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: n
       .addScaledVector(basisX, coil.radiusMm * (Math.cos(angle) - 1))
       .addScaledVector(basisY, coil.radiusMm * Math.sin(angle));
   });
-  return new THREE.CatmullRomCurve3(points, false, "centripetal");
+  return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm, points.slice(1, -1));
 }
 
 function routePoints(curve: THREE.Curve<THREE.Vector3>, count = 24): HarnessPoint3[] {
@@ -233,26 +230,26 @@ function addSegmentMeshes(meshes: CadMesh[], project: ProjectDocument, harness: 
   }
 }
 
-function connectorDirection(harness: HarnessAssembly, nodeId: string, positions: Map<string, HarnessPoint3>) {
-  const origin = positions.get(nodeId);
-  if (!origin) return new THREE.Vector3(0, 0, 1);
-  const direction = harness.segments.reduce((sum, segment) => {
-    const otherId = segment.fromNodeId === nodeId ? segment.toNodeId : segment.toNodeId === nodeId ? segment.fromNodeId : null;
-    const other = otherId ? positions.get(otherId) : undefined;
-    return other ? sum.add(new THREE.Vector3(other.x - origin.x, other.y - origin.y, other.z - origin.z).normalize()) : sum;
-  }, new THREE.Vector3());
-  return direction.lengthSq() < 0.001 ? new THREE.Vector3(0, 0, 1) : direction.normalize();
-}
-
 export function buildHarnessCadData(project: ProjectDocument, harness: HarnessAssembly): HarnessCadData {
   const nodePositions = layoutHarnessNodes(harness);
   const meshes: CadMesh[] = [];
   const routes: CadRoute[] = [];
+  const connectionPorts = new Map(harness.nodes.flatMap((node) => {
+    if (node.kind !== "connector") return [];
+    const part = project.parts.find((item) => item.id === node.partId);
+    const placement = getModelPlacement(part);
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      THREE.MathUtils.degToRad(node.threeDRotation?.x ?? 0),
+      THREE.MathUtils.degToRad(node.threeDRotation?.y ?? 0),
+      THREE.MathUtils.degToRad(node.threeDRotation?.z ?? 0),
+    ));
+    return [[node.id, { direction: inletDirectionVector(placement).applyQuaternion(rotation).normalize(), straightLeadMm: placement.straightLeadMm }] as const];
+  }));
   for (const segment of harness.segments) {
     const from = nodePositions.get(segment.fromNodeId);
     const to = nodePositions.get(segment.toNodeId);
     if (!from || !to || segment.lengthMm <= 0) continue;
-    const curve = segmentCurve(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(to.x, to.y, to.z), segment.lengthMm, segment.threeDRoute);
+    const curve = segmentCurve(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(to.x, to.y, to.z), segment.lengthMm, segment.threeDRoute, connectionPorts.get(segment.fromNodeId), connectionPorts.get(segment.toNodeId));
     addSegmentMeshes(meshes, project, harness, segment, curve);
     routes.push({ id: segment.id, reference: segment.label, lengthMm: segment.lengthMm, fromNodeId: segment.fromNodeId, toNodeId: segment.toNodeId, points: routePoints(curve) });
   }
@@ -265,8 +262,15 @@ export function buildHarnessCadData(project: ProjectDocument, harness: HarnessAs
     const visual = asset?.meshes.length ? modelGroup(asset, placement.scale) : node.kind === "connector"
       ? new THREE.Mesh(new THREE.BoxGeometry(14, 8, 10))
       : new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 8));
-    const root = node.kind === "connector" ? placeConnectorVisual(visual, placement, connectorDirection(harness, node.id, nodePositions)) : visual;
+    const visualRoot = node.kind === "connector" ? placeConnectorVisual(visual, placement) : visual;
+    const root = new THREE.Group();
     root.position.set(position.x, position.y, position.z);
+    root.rotation.set(
+      THREE.MathUtils.degToRad(node.threeDRotation?.x ?? 0),
+      THREE.MathUtils.degToRad(node.threeDRotation?.y ?? 0),
+      THREE.MathUtils.degToRad(node.threeDRotation?.z ?? 0),
+    );
+    root.add(visualRoot);
     meshes.push(...objectMeshes(root, `${node.reference}_${part?.partNumber ?? node.kind}`));
   }
   const fallbackPosition = nodePositions.values().next().value as HarnessPoint3 | undefined;

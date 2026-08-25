@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Harness Designer",
-  "version": "0.1.0",
+  "version": "0.3.33",
   "identifier": "com.harnessdesigner.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,9 +13,9 @@
     "windows": [
       {
         "label": "main",
-        "title": "Harness Designer",
-        "width": 1600,
-        "height": 920,
+        "title": "Harness Designer v0.3.33",
+        "width": 1920,
+        "height": 1080,
         "minWidth": 1024,
         "minHeight": 680,
         "resizable": true,
@@ -28,13 +28,11 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
-    "resources": {
-      "../node_modules/occt-import-js/LICENSE.md": "licenses/occt-import-js-LGPL-2.1.txt",
-      "../node_modules/occt-import-js/dist/license.occt.txt": "licenses/OpenCASCADE-LGPL-2.1-exception.txt",
-      "../node_modules/three/LICENSE": "licenses/three-MIT.txt",
-      "assets/parts/": "parts"
-    },
+    "resources": [
+      "resources/default-parts-2d.json"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -44,6 +42,17 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExMkI2NzlFQzhDNjVCOUQKUldTZFc4YklubWNyRWNERGJ6bW00MjZsQTlwMzA1MnpNRWtEYTBQWEY5OGI5Rzc3bHR1MDQvbFYK",
+      "endpoints": [
+        "https://github.com/murse2000/HarnessDesigner/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

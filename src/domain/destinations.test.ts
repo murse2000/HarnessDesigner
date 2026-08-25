@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { searchPinDestinations } from "./destinations";
 
 describe("핀 목적지 검색", () => {
   it("참조명과 핀 번호로 검색하고 용량이 찬 핀은 제외한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const source = harness.nodes.find((node) => node.reference === "J1")!;
     const target = harness.nodes.find((node) => node.reference === "J2")!;
@@ -18,7 +18,7 @@ describe("핀 목적지 검색", () => {
   });
 
   it("부품번호와 핀 이름도 검색한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const source = harness.nodes[0];
     const target = harness.nodes.find((node) => node.id !== source.id && node.pins.length > 2)!;

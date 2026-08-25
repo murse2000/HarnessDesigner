@@ -41,4 +41,14 @@ describe("STEP 2D 투영", () => {
     expect(alignedWidth).toBeGreaterThan(alignedHeight);
     expect(width).toBeLessThan(height);
   });
+
+  it("사용자가 지정한 XYZ 회전값을 투영에 적용한다", () => {
+    const original = createStepProjectionSymbol(asset, "front", 1, "original", { cableAxis: "+z", rollDeg: 0 });
+    const rotated = createStepProjectionSymbol(asset, "front", 1, "rotated", { cableAxis: "+z", rollDeg: 0, rotationZDeg: 90 });
+    const [, , originalWidth, originalHeight] = original.viewBox.split(" ").map(Number);
+    const [, , rotatedWidth, rotatedHeight] = rotated.viewBox.split(" ").map(Number);
+
+    expect(originalWidth).toBeGreaterThan(originalHeight);
+    expect(rotatedWidth).toBeLessThan(rotatedHeight);
+  });
 });

@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { conductorsInSegment, duplicatePartGroups, partUsage, unusedParts } from "./powerTools";
 
 describe("하네스 파워 도구", () => {
   it("번들에 통과하는 전선을 찾는다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     expect(conductorsInSegment(project.harnesses[0], "seg-1").map((item) => item.reference)).toEqual(["W001", "W002"]);
   });
 
   it("부품 사용처와 미사용 및 중복 부품을 계산한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const duplicate = { ...structuredClone(project.parts[0]), id: "duplicate-part" };
     const unused = { ...structuredClone(project.parts[0]), id: "unused-part", partNumber: "UNUSED" };
     project.parts.push(duplicate, unused);

@@ -40,7 +40,7 @@ export function validateProject(project: ProjectDocument, rules?: Partial<Record
       const cablePart = project.parts.find((part) => part.id === segment.cablePartId && part.category === "cable");
       const coreCount = Number(cablePart?.attributes.coreCount);
       const coreIds = new Set(cablePart ? getCableCores(cablePart).map((core) => core.id) : []);
-      const routedCoreCount = harness.conductors.filter((conductor) => conductor.routeSegmentIds.includes(segment.id) && (!conductor.cableCoreId || coreIds.has(conductor.cableCoreId))).length;
+      const routedCoreCount = harness.conductors.filter((conductor) => conductor.cableRunId === segment.id && (!conductor.cableCoreId || coreIds.has(conductor.cableCoreId))).length;
       if (Number.isFinite(coreCount) && coreCount > 0 && routedCoreCount > coreCount) {
         issues.push(issue("warning", "CABLE_CORE_CAPACITY", "validation.cableCoreCapacity", segment.id, harness.id));
       }

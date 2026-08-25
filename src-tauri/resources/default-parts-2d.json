@@ -1,0 +1,126 @@
+[
+  {
+    "id": "default-molex-51021-0400",
+    "category": "housing",
+    "name": "PicoBlade 4핀 리셉터클 하우징",
+    "partNumber": "51021-0400",
+    "manufacturer": "Molex",
+    "description": "4 circuit receptacle housing",
+    "outerDiameterMm": null,
+    "pins": [
+      { "number": "1", "name": "PIN 1" },
+      { "number": "2", "name": "PIN 2" },
+      { "number": "3", "name": "PIN 3" },
+      { "number": "4", "name": "PIN 4" }
+    ],
+    "cores": []
+  },
+  {
+    "id": "default-molex-43025-0400",
+    "category": "housing",
+    "name": "Micro-Fit 3.0 4핀 리셉터클 하우징",
+    "partNumber": "43025-0400",
+    "manufacturer": "Molex",
+    "description": "4 circuit receptacle housing",
+    "outerDiameterMm": null,
+    "pins": [
+      { "number": "1", "name": "PIN 1" },
+      { "number": "2", "name": "PIN 2" },
+      { "number": "3", "name": "PIN 3" },
+      { "number": "4", "name": "PIN 4" }
+    ],
+    "cores": []
+  },
+  {
+    "id": "default-jst-xhp-4",
+    "category": "housing",
+    "name": "XH 4핀 리셉터클 하우징",
+    "partNumber": "XHP-4",
+    "manufacturer": "JST",
+    "description": "4 circuit receptacle housing",
+    "outerDiameterMm": null,
+    "pins": [
+      { "number": "1", "name": "PIN 1" },
+      { "number": "2", "name": "PIN 2" },
+      { "number": "3", "name": "PIN 3" },
+      { "number": "4", "name": "PIN 4" }
+    ],
+    "cores": []
+  },
+  {
+    "id": "default-hirose-df13-4s-1.25c",
+    "category": "housing",
+    "name": "DF13 4핀 리셉터클 하우징",
+    "partNumber": "DF13-4S-1.25C",
+    "manufacturer": "Hirose",
+    "description": "4 circuit receptacle housing",
+    "outerDiameterMm": null,
+    "pins": [
+      { "number": "1", "name": "PIN 1" },
+      { "number": "2", "name": "PIN 2" },
+      { "number": "3", "name": "PIN 3" },
+      { "number": "4", "name": "PIN 4" }
+    ],
+    "cores": []
+  },
+  {
+    "id": "default-wire-txl-20-rd",
+    "category": "wire",
+    "name": "TXL 20 AWG 적색 단선",
+    "partNumber": "TXL-20-RD",
+    "manufacturer": "Generic",
+    "description": "20 AWG automotive primary wire",
+    "outerDiameterMm": 1.8,
+    "pins": [],
+    "cores": [
+      { "name": "WIRE", "color": "RD", "gauge": "20 AWG" }
+    ]
+  },
+  {
+    "id": "default-wire-txl-20-bk",
+    "category": "wire",
+    "name": "TXL 20 AWG 흑색 단선",
+    "partNumber": "TXL-20-BK",
+    "manufacturer": "Generic",
+    "description": "20 AWG automotive primary wire",
+    "outerDiameterMm": 1.8,
+    "pins": [],
+    "cores": [
+      { "name": "WIRE", "color": "BK", "gauge": "20 AWG" }
+    ]
+  },
+  {
+    "id": "default-cable-4c-22awg",
+    "category": "cable",
+    "name": "4코어 22 AWG 멀티코어 케이블",
+    "partNumber": "MC-4C-22AWG",
+    "manufacturer": "Generic",
+    "description": "4 core multicore cable",
+    "outerDiameterMm": 5.2,
+    "pins": [],
+    "cores": [
+      { "name": "CORE 1", "color": "BK", "gauge": "22 AWG" },
+      { "name": "CORE 2", "color": "WH", "gauge": "22 AWG" },
+      { "name": "CORE 3", "color": "RD", "gauge": "22 AWG" },
+      { "name": "CORE 4", "color": "GN", "gauge": "22 AWG" }
+    ]
+  },
+  {
+    "id": "default-cable-6c-22awg",
+    "category": "cable",
+    "name": "6코어 22 AWG 멀티코어 케이블",
+    "partNumber": "MC-6C-22AWG",
+    "manufacturer": "Generic",
+    "description": "6 core multicore cable",
+    "outerDiameterMm": 6.2,
+    "pins": [],
+    "cores": [
+      { "name": "CORE 1", "color": "BK", "gauge": "22 AWG" },
+      { "name": "CORE 2", "color": "WH", "gauge": "22 AWG" },
+      { "name": "CORE 3", "color": "RD", "gauge": "22 AWG" },
+      { "name": "CORE 4", "color": "GN", "gauge": "22 AWG" },
+      { "name": "CORE 5", "color": "BU", "gauge": "22 AWG" },
+      { "name": "CORE 6", "color": "YE", "gauge": "22 AWG" }
+    ]
+  }
+]

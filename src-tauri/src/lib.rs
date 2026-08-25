@@ -1,586 +1,235 @@
-mod app_settings;
-mod export;
-mod library;
-mod model;
-mod project_file;
-mod session;
+mod rebuild2d_library;
 
-use model::{
-    BomExportRow, ContinuityTestExportRow, ContinuityTestResultExportRow, CutExportRow,
-    HarnessBomExportRow, ModelAsset, PartSnapshot, ProjectDocument, SessionSnapshot,
-};
-use serde::Serialize;
-use session::ProjectSessionManager;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, State};
-
-#[tauri::command]
-fn create_project(
-    project: ProjectDocument,
-    sessions: State<ProjectSessionManager>,
-) -> SessionSnapshot {
-    sessions.create(project)
-}
-
-#[tauri::command]
-fn get_session(
-    session_id: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    sessions.get(&session_id)
-}
-
-#[tauri::command]
-fn replace_project(
-    app: AppHandle,
-    session_id: String,
-    project: ProjectDocument,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    sessions.replace(&app, &session_id, project)
-}
-
-#[tauri::command]
-fn undo_project(
-    app: AppHandle,
-    session_id: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    sessions.undo(&app, &session_id)
-}
-
-#[tauri::command]
-fn redo_project(
-    app: AppHandle,
-    session_id: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    sessions.redo(&app, &session_id)
-}
-
-#[tauri::command]
-fn open_project(
-    path: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    let path = PathBuf::from(path);
-    if let Some(snapshot) = sessions.find_by_path(&path) {
-        return Ok(snapshot);
-    }
-    let project = project_file::read_project(&path)?;
-    let (read_only, lock_path) = project_file::acquire_lock(&path)?;
-    Ok(sessions.insert_opened(project, path, read_only, lock_path))
-}
-
-#[tauri::command]
-fn save_project(
-    app: AppHandle,
-    session_id: String,
-    path: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    let snapshot = sessions.get(&session_id)?;
-    if snapshot.read_only {
-        return Err("읽기 전용 프로젝트는 저장할 수 없습니다.".into());
-    }
-    let path = PathBuf::from(path);
-    let project_id = snapshot.project.id.clone();
-    let mut project = snapshot.project;
-    project.updated_at = chrono_like_now();
-    let same_path = snapshot.path.as_deref() == Some(path.to_string_lossy().as_ref());
-    let lock_path = if same_path {
-        None
-    } else {
-        let (read_only, lock_path) = project_file::acquire_lock(&path)?;
-        if read_only {
-            return Err("다른 사용자가 편집 중인 프로젝트 경로입니다.".into());
-        }
-        lock_path
-    };
-    if let Err(error) = project_file::write_project(&path, &project) {
-        if let Some(lock) = &lock_path {
-            let _ = std::fs::remove_file(lock);
-        }
-        return Err(error);
-    }
-    let recovery_directory = app_data_path(&app)?
-        .join("recovery")
-        .join(project_id.replace(
-            |character: char| {
-                !character.is_ascii_alphanumeric() && character != '-' && character != '_'
-            },
-            "_",
-        ));
-    if recovery_directory.exists() {
-        let _ = std::fs::remove_dir_all(recovery_directory);
-    }
-    sessions.mark_saved(&app, &session_id, path, lock_path)
-}
-
-#[tauri::command]
-fn close_project(session_id: String, sessions: State<ProjectSessionManager>) -> Result<(), String> {
-    sessions.close(&session_id)
-}
-
-#[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
-    export::write_text(&PathBuf::from(path), &content)
-}
-
-#[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn write_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
-    export::write_binary(&PathBuf::from(path), &content)
-}
-
-#[tauri::command]
-fn export_xlsx(
-    path: String,
-    bom: Vec<BomExportRow>,
-    harness_bom: Vec<HarnessBomExportRow>,
-    cuts: Vec<CutExportRow>,
-    tests: Vec<ContinuityTestExportRow>,
-    test_results: Vec<ContinuityTestResultExportRow>,
-) -> Result<(), String> {
-    export::write_xlsx(
-        &PathBuf::from(path),
-        &bom,
-        &harness_bom,
-        &cuts,
-        &tests,
-        &test_results,
-    )
-}
-
-#[tauri::command]
-fn export_solidworks_routing_package(
-    path: String,
-    entries: Vec<export::RoutingPackageEntry>,
-    from_to_rows: Vec<Vec<String>>,
-    cable_library_rows: Vec<Vec<String>>,
-) -> Result<(), String> {
-    export::write_solidworks_routing_package(
-        &PathBuf::from(path),
-        &entries,
-        &from_to_rows,
-        &cable_library_rows,
-    )
-}
+use tauri::{AppHandle, Manager};
 
 fn app_data_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|error| error.to_string())
 }
 
-fn library_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app_settings::library_path(&app_data_path(app)?)
-}
-
-fn prepare_library(app: &AppHandle) -> Result<PathBuf, String> {
-    let path = library_path(app)?;
-    library::initialize(&path)?;
-    #[cfg(desktop)]
-    {
-        let resources = app
-            .path()
-            .resource_dir()
-            .map_err(|error| error.to_string())?;
-        library::seed_builtin_model_assets(&path, &resources.join("parts"))?;
+fn validate_rebuilt_project(project: &serde_json::Value) -> Result<(), String> {
+    if project.get("documentType").and_then(serde_json::Value::as_str) != Some("harness-designer-2d") {
+        return Err("새 2D 프로젝트 형식이 아닙니다.".into());
     }
-    Ok(path)
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LibraryStatus {
-    directory: String,
-    database_path: String,
-    part_count: usize,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RecoveryEntry {
-    path: String,
-    project_name: String,
-    project_number: String,
-    updated_at: String,
-}
-
-fn backup_library(app: &AppHandle, path: &Path) -> Result<(), String> {
-    let retention = app_settings::library_backup_retention(&app_data_path(app)?)?;
-    library::create_rotating_backup(path, retention)
-}
-
-#[tauri::command]
-fn get_library_status(app: AppHandle) -> Result<LibraryStatus, String> {
-    let path = prepare_library(&app)?;
-    let part_count = library::list(&path)?.len();
-    Ok(LibraryStatus {
-        directory: path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .to_string_lossy()
-            .to_string(),
-        database_path: path.to_string_lossy().to_string(),
-        part_count,
-    })
-}
-
-#[tauri::command]
-fn set_library_directory(
-    app: AppHandle,
-    directory: String,
-    copy_existing: bool,
-) -> Result<LibraryStatus, String> {
-    let app_data = app_data_path(&app)?;
-    let current =
-        app_settings::library_path(&app_data).unwrap_or_else(|_| app_data.join("library.db"));
-    let directory = PathBuf::from(directory);
-    if !directory.is_dir() {
-        return Err("선택한 라이브러리 폴더가 존재하지 않습니다.".into());
+    if project.get("schemaVersion").and_then(serde_json::Value::as_u64) != Some(2) {
+        return Err("지원하지 않는 2D 프로젝트 스키마입니다.".into());
     }
-    let target = directory.join("library.db");
-    if copy_existing && current.exists() && current != target && !target.exists() {
-        library::copy_package(&current, &target)?;
+    let harnesses = project.get("harnesses").and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "프로젝트 하네스 목록이 없습니다.".to_string())?;
+    if harnesses.is_empty() {
+        return Err("프로젝트에 하네스가 없습니다.".into());
     }
-    library::initialize(&target)?;
-    app_settings::set_library_directory(&app_data, &directory)?;
-    get_library_status(app)
+    Ok(())
 }
 
-#[tauri::command]
-fn export_library_database(app: AppHandle, path: String) -> Result<(), String> {
-    let source = library_path(&app)?;
-    let target = PathBuf::from(path);
-    library::export_package(&source, &target)
-}
-
-#[tauri::command]
-fn import_library_database(app: AppHandle, path: String) -> Result<LibraryStatus, String> {
-    let source = PathBuf::from(path);
-    let target = library_path(&app)?;
-    if let (Ok(source), Ok(target)) = (source.canonicalize(), target.canonicalize()) {
-        if source == target {
-            return get_library_status(app);
-        }
+fn write_rebuilt_project(path: &Path, project: &serde_json::Value) -> Result<(), String> {
+    validate_rebuilt_project(project)?;
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "프로젝트 저장 폴더를 확인할 수 없습니다.".to_string())?;
+    if !parent.is_dir() {
+        return Err("프로젝트 저장 폴더가 존재하지 않습니다.".into());
     }
-    backup_library(&app, &target)?;
-    library::import_package(&source, &target)?;
-    get_library_status(app)
-}
-
-#[tauri::command]
-fn list_library_parts(app: AppHandle) -> Result<Vec<PartSnapshot>, String> {
-    library::list(&prepare_library(&app)?)
-}
-
-#[tauri::command]
-fn upsert_library_part(app: AppHandle, part: PartSnapshot) -> Result<(), String> {
-    let path = library_path(&app)?;
-    backup_library(&app, &path)?;
-    library::upsert(&path, &part)
-}
-
-#[tauri::command]
-fn get_library_model_asset(app: AppHandle, asset_id: String) -> Result<Option<ModelAsset>, String> {
-    library::get_model_asset(&library_path(&app)?, &asset_id)
-}
-
-#[tauri::command]
-fn upsert_library_model_asset(app: AppHandle, asset: ModelAsset) -> Result<(), String> {
-    let path = library_path(&app)?;
-    backup_library(&app, &path)?;
-    library::upsert_model_asset(&path, &asset)
-}
-
-#[tauri::command]
-fn get_library_symbol_asset(
-    app: AppHandle,
-    asset_id: String,
-) -> Result<Option<model::SymbolAsset>, String> {
-    library::get_symbol_asset(&library_path(&app)?, &asset_id)
-}
-
-#[tauri::command]
-fn upsert_library_symbol_asset(app: AppHandle, asset: model::SymbolAsset) -> Result<(), String> {
-    let path = library_path(&app)?;
-    backup_library(&app, &path)?;
-    library::upsert_symbol_asset(&path, &asset)
-}
-
-#[tauri::command]
-fn set_library_backup_retention(app: AppHandle, retention: usize) -> Result<(), String> {
-    app_settings::set_library_backup_retention(&app_data_path(&app)?, retention)
-}
-
-#[tauri::command]
-fn check_library_integrity(app: AppHandle) -> Result<library::LibraryIntegrity, String> {
-    library::check_integrity(&library_path(&app)?)
-}
-
-#[tauri::command]
-fn save_recovery_snapshot(
-    app: AppHandle,
-    session_id: String,
-    retention: usize,
-    sessions: State<ProjectSessionManager>,
-) -> Result<(), String> {
-    let snapshot = sessions.get(&session_id)?;
-    if !snapshot.dirty || snapshot.read_only || retention == 0 {
-        return Ok(());
+    let temporary_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+    let content = serde_json::to_vec_pretty(project).map_err(|error| error.to_string())?;
+    std::fs::write(&temporary_path, content).map_err(|error| error.to_string())?;
+    if let Err(error) = std::fs::rename(&temporary_path, path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(error.to_string());
     }
-    let directory = app_data_path(&app)?
-        .join("recovery")
-        .join(snapshot.project.id.replace(
-            |character: char| {
-                !character.is_ascii_alphanumeric() && character != '-' && character != '_'
-            },
-            "_",
-        ));
-    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    project_file::write_project(
-        &directory.join(format!("{nanos}.harness")),
-        &snapshot.project,
-    )?;
-    let mut entries = std::fs::read_dir(&directory)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "harness")
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name());
-    let remove_count = entries.len().saturating_sub(retention.min(100));
-    for entry in entries.into_iter().take(remove_count) {
-        std::fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn read_rebuilt_project(path: &Path) -> Result<serde_json::Value, String> {
+    let content = std::fs::read(path).map_err(|error| error.to_string())?;
+    let project = serde_json::from_slice(&content).map_err(|error| error.to_string())?;
+    validate_rebuilt_project(&project)?;
+    Ok(project)
+}
+
+fn write_rebuilt_binary(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "출력 파일의 저장 폴더를 확인할 수 없습니다.".to_string())?;
+    if !parent.is_dir() {
+        return Err("출력 파일의 저장 폴더가 존재하지 않습니다.".into());
+    }
+    let temporary_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&temporary_path, content).map_err(|error| error.to_string())?;
+    if let Err(error) = std::fs::rename(&temporary_path, path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(error.to_string());
     }
     Ok(())
 }
 
 #[tauri::command]
-fn list_recovery_snapshots(app: AppHandle) -> Result<Vec<RecoveryEntry>, String> {
-    let root = app_data_path(&app)?.join("recovery");
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut recoveries = Vec::new();
-    for directory in std::fs::read_dir(root)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-    {
-        if !directory.path().is_dir() {
-            continue;
-        }
-        for entry in std::fs::read_dir(directory.path())
-            .map_err(|error| error.to_string())?
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path
-                .extension()
-                .is_none_or(|extension| extension != "harness")
-            {
-                continue;
-            }
-            if let Ok(project) = project_file::read_project(&path) {
-                recoveries.push(RecoveryEntry {
-                    path: path.to_string_lossy().to_string(),
-                    project_name: project.name,
-                    project_number: project.project_number,
-                    updated_at: project.updated_at,
-                });
-            }
-        }
-    }
-    recoveries.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-    Ok(recoveries)
+fn save_rebuilt_project(path: String, project: serde_json::Value) -> Result<(), String> {
+    write_rebuilt_project(&PathBuf::from(path), &project)
 }
 
 #[tauri::command]
-fn open_recovery_snapshot(
-    app: AppHandle,
-    path: String,
-    sessions: State<ProjectSessionManager>,
-) -> Result<SessionSnapshot, String> {
-    let root = app_data_path(&app)?
-        .join("recovery")
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let target = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !target.starts_with(root)
-        || target
-            .extension()
-            .is_none_or(|extension| extension != "harness")
-    {
-        return Err("복구본 경로가 올바르지 않습니다.".into());
-    }
-    Ok(sessions.create_recovered(project_file::read_project(&target)?))
+fn open_rebuilt_project(path: String) -> Result<serde_json::Value, String> {
+    read_rebuilt_project(&PathBuf::from(path))
 }
 
 #[tauri::command]
-fn delete_recovery_snapshot(app: AppHandle, path: String) -> Result<(), String> {
-    let root = app_data_path(&app)?
-        .join("recovery")
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    delete_recovery_files(&root, &[path])
-}
-
-fn delete_recovery_files(root: &Path, paths: &[String]) -> Result<(), String> {
-    let targets = paths
-        .iter()
-        .map(|path| {
-            let target = PathBuf::from(path)
-                .canonicalize()
-                .map_err(|error| error.to_string())?;
-            if !target.starts_with(root)
-                || target
-                    .extension()
-                    .is_none_or(|extension| extension != "harness")
-            {
-                return Err("복구본 경로가 올바르지 않습니다.".into());
-            }
-            Ok(target)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    for target in targets {
-        std::fs::remove_file(target).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod recovery_tests {
-    use super::delete_recovery_files;
-    use std::fs;
-
-    #[test]
-    fn deletes_all_valid_recovery_files() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("recovery");
-        fs::create_dir(&root).unwrap();
-        let first = root.join("first.harness");
-        let second = root.join("second.harness");
-        fs::write(&first, b"first").unwrap();
-        fs::write(&second, b"second").unwrap();
-        let root = root.canonicalize().unwrap();
-
-        delete_recovery_files(
-            &root,
-            &[
-                first.to_string_lossy().to_string(),
-                second.to_string_lossy().to_string(),
-            ],
-        )
-        .unwrap();
-
-        assert!(!first.exists());
-        assert!(!second.exists());
-    }
-
-    #[test]
-    fn validates_every_path_before_deleting_any_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("recovery");
-        fs::create_dir(&root).unwrap();
-        let valid = root.join("valid.harness");
-        let outside = directory.path().join("outside.harness");
-        fs::write(&valid, b"valid").unwrap();
-        fs::write(&outside, b"outside").unwrap();
-        let root = root.canonicalize().unwrap();
-
-        let result = delete_recovery_files(
-            &root,
-            &[
-                valid.to_string_lossy().to_string(),
-                outside.to_string_lossy().to_string(),
-            ],
-        );
-
-        assert!(result.is_err());
-        assert!(valid.exists());
-        assert!(outside.exists());
-    }
+fn write_rebuilt_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
+    write_rebuilt_binary(&PathBuf::from(path), &content)
 }
 
 #[tauri::command]
-fn delete_recovery_snapshots(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
-    let root = app_data_path(&app)?
-        .join("recovery")
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    delete_recovery_files(&root, &paths)
+fn print_rebuilt_webview(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|error| error.to_string())
+fn create_rebuilt_parts_library(app: AppHandle, path: String, name: String) -> Result<rebuild2d_library::LibrarySummary2d, String> {
+    let path = PathBuf::from(path);
+    let summary = rebuild2d_library::create(&path, &name)?;
+    rebuild2d_library::set_selected_path(&app_data_path(&app)?, &path)?;
+    Ok(summary)
 }
 
-fn chrono_like_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("unix:{seconds}")
+#[tauri::command]
+fn open_rebuilt_parts_library(app: AppHandle, path: String) -> Result<rebuild2d_library::LibrarySummary2d, String> {
+    let path = PathBuf::from(path);
+    let summary = rebuild2d_library::summary(&path)?;
+    rebuild2d_library::set_selected_path(&app_data_path(&app)?, &path)?;
+    Ok(summary)
+}
+
+#[tauri::command]
+fn get_rebuilt_parts_library(app: AppHandle) -> Result<Option<rebuild2d_library::LibrarySummary2d>, String> {
+    rebuild2d_library::ensure_default_library(&app_data_path(&app)?).map(|installed| Some(installed.library))
+}
+
+#[tauri::command]
+fn get_rebuilt_default_library_folder(app: AppHandle) -> Result<String, String> {
+    rebuild2d_library::ensure_default_library(&app_data_path(&app)?).map(|installed| installed.folder)
+}
+
+#[tauri::command]
+fn set_rebuilt_default_library_folder(app: AppHandle, folder: String) -> Result<rebuild2d_library::DefaultLibraryInstallation2d, String> {
+    rebuild2d_library::install_default_library(&app_data_path(&app)?, &PathBuf::from(folder))
+}
+
+#[tauri::command]
+fn query_rebuilt_parts_library(app: AppHandle, query: String, category: Option<String>, offset: usize, limit: usize) -> Result<rebuild2d_library::LibraryPage2d, String> {
+    let path = rebuild2d_library::selected_path(&app_data_path(&app)?)?
+        .ok_or_else(|| "부품 라이브러리를 먼저 지정하세요.".to_string())?;
+    rebuild2d_library::query(&path, &query, category.as_deref(), offset, limit)
+}
+
+#[tauri::command]
+fn upsert_rebuilt_library_part(app: AppHandle, part: rebuild2d_library::LibraryPart2d) -> Result<rebuild2d_library::LibraryPart2d, String> {
+    let path = rebuild2d_library::selected_path(&app_data_path(&app)?)?
+        .ok_or_else(|| "부품 라이브러리를 먼저 지정하세요.".to_string())?;
+    rebuild2d_library::upsert(&path, part)
+}
+
+#[tauri::command]
+fn delete_rebuilt_library_part(app: AppHandle, part_id: String) -> Result<(), String> {
+    let path = rebuild2d_library::selected_path(&app_data_path(&app)?)?
+        .ok_or_else(|| "부품 라이브러리를 먼저 지정하세요.".to_string())?;
+    rebuild2d_library::delete(&path, &part_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        let windows = app.webview_windows();
+        let window = windows.get("main").or_else(|| windows.values().next());
+        if let Some(window) = window {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .plugin(tauri_plugin_dialog::init())
-        .manage(ProjectSessionManager::default())
-        .setup(|app| {
-            prepare_library(app.handle()).map_err(std::io::Error::other)?;
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
-            create_project,
-            get_session,
-            replace_project,
-            undo_project,
-            redo_project,
-            open_project,
-            save_project,
-            close_project,
-            read_text_file,
-            write_text_file,
-            write_binary_file,
-            export_xlsx,
-            export_solidworks_routing_package,
-            list_library_parts,
-            upsert_library_part,
-            get_library_model_asset,
-            upsert_library_model_asset,
-            get_library_symbol_asset,
-            upsert_library_symbol_asset,
-            read_binary_file,
-            get_library_status,
-            set_library_directory,
-            export_library_database,
-            import_library_database,
-            set_library_backup_retention,
-            check_library_integrity,
-            save_recovery_snapshot,
-            list_recovery_snapshots,
-            open_recovery_snapshot,
-            delete_recovery_snapshot,
-            delete_recovery_snapshots
+            open_rebuilt_project,
+            save_rebuilt_project,
+            write_rebuilt_binary_file,
+            print_rebuilt_webview,
+            create_rebuilt_parts_library,
+            open_rebuilt_parts_library,
+            get_rebuilt_parts_library,
+            get_rebuilt_default_library_folder,
+            set_rebuilt_default_library_folder,
+            query_rebuilt_parts_library,
+            upsert_rebuilt_library_part,
+            delete_rebuilt_library_part,
         ])
         .run(tauri::generate_context!())
         .expect("Harness Designer 실행에 실패했습니다.");
+}
+
+#[cfg(test)]
+mod rebuilt_project_tests {
+    use super::{read_rebuilt_project, write_rebuilt_binary, write_rebuilt_project};
+    use serde_json::json;
+
+    fn project() -> serde_json::Value {
+        json!({
+            "documentType": "harness-designer-2d",
+            "schemaVersion": 2,
+            "id": "project-1",
+            "projectNumber": "PRJ-001",
+            "name": "Test",
+            "createdAt": "2026-08-22T00:00:00Z",
+            "updatedAt": "2026-08-22T00:00:00Z",
+            "harnesses": [{
+                "id": "harness-1",
+                "partNumber": "HNS-001",
+                "name": "Harness",
+                "revision": "A",
+                "components": [],
+                "connections": [],
+                "cableRuns": [],
+                "drawing": { "componentPlacements": {} }
+            }]
+        })
+    }
+
+    #[test]
+    fn saves_and_reopens_the_new_2d_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("project.harness2d");
+        let expected = project();
+        write_rebuilt_project(&path, &expected).unwrap();
+        assert_eq!(read_rebuilt_project(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn rejects_legacy_project_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("legacy.harness");
+        let legacy = json!({ "schemaVersion": 1, "harnesses": [{}] });
+        assert!(write_rebuilt_project(&path, &legacy).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn writes_binary_output_without_changing_its_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("drawing.pdf");
+        let expected = b"%PDF-1.7\nHarness Designer";
+
+        write_rebuilt_binary(&path, expected).unwrap();
+
+        assert_eq!(std::fs::read(path).unwrap(), expected);
+    }
 }

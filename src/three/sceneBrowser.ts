@@ -15,7 +15,9 @@ export function buildThreeSceneItems(project: ProjectDocument, harness: HarnessA
   });
   const segments: ThreeSceneItem[] = harness.segments.map((segment) => {
     const part = partById.get(segment.cablePartId ?? "");
-    const cores = harness.conductors.filter((conductor) => conductor.routeSegmentIds.includes(segment.id)).length;
+    const cores = harness.conductors.filter((conductor) => part?.category === "cable"
+      ? conductor.cableRunId === segment.id
+      : !conductor.cableRunId && conductor.routeSegmentIds.includes(segment.id)).length;
     return { id: segment.id, kind: "segment", reference: segment.label, detail: `${part?.partNumber ?? "개별 전선"} · ${cores}C · ${segment.lengthMm} mm` };
   });
   const accessories: ThreeSceneItem[] = harness.accessories.map((accessory) => {

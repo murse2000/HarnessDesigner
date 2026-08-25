@@ -1,6 +1,6 @@
 use crate::model::{ModelAsset, PartSnapshot, SymbolAsset};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 use std::{
     fs,
@@ -12,6 +12,10 @@ use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 const DEFAULT_PARTS_JSON: &str = include_str!("default_parts.json");
 const DEFAULT_MX150_PARTS_JSON: &str = include_str!("default_mx150_parts.json");
 const DEFAULT_JST_HIROSE_PARTS_JSON: &str = include_str!("default_jst_hirose_parts.json");
+const LEGACY_SAMPLE_PARTS: &[(&str, &str)] = &[
+    ("part-housing-4", "builtin-molex-51021-0400"),
+    ("part-housing-8", "builtin-molex-33482-4801"),
+];
 
 fn default_parts() -> Result<Vec<PartSnapshot>, String> {
     let mut parts: Vec<PartSnapshot> =
@@ -212,6 +216,7 @@ fn query_asset_paths(connection: &Connection, sql: &str) -> Result<Vec<(String, 
 pub fn list(path: &Path) -> Result<Vec<PartSnapshot>, String> {
     initialize(path)?;
     seed_default_parts(path)?;
+    remove_legacy_sample_parts(path)?;
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare("SELECT json FROM parts ORDER BY category, part_number")
@@ -224,6 +229,68 @@ pub fn list(path: &Path) -> Result<Vec<PartSnapshot>, String> {
             .and_then(|json| serde_json::from_str(&json).map_err(|error| error.to_string()))
     })
     .collect()
+}
+
+fn remove_legacy_sample_parts(path: &Path) -> Result<usize, String> {
+    let connection = Connection::open(path).map_err(|error| error.to_string())?;
+    let mut removed = 0;
+    for (legacy_id, canonical_id) in LEGACY_SAMPLE_PARTS {
+        let canonical_exists = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM parts WHERE id = ?1)",
+                [canonical_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if !canonical_exists {
+            continue;
+        }
+        let legacy_json = connection
+            .query_row("SELECT json FROM parts WHERE id = ?1", [legacy_id], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(|error| error.to_string())?;
+        let Some(legacy_json) = legacy_json else {
+            continue;
+        };
+        let legacy: PartSnapshot =
+            serde_json::from_str(&legacy_json).map_err(|error| error.to_string())?;
+        removed += connection
+            .execute("DELETE FROM parts WHERE id = ?1", [legacy_id])
+            .map_err(|error| error.to_string())?;
+        let Some(symbol_id) = legacy.symbol_asset_id else {
+            continue;
+        };
+        let referenced = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM parts WHERE json_extract(json, '$.symbolAssetId') = ?1)",
+                [&symbol_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if referenced {
+            continue;
+        }
+        let source_path = connection
+            .query_row(
+                "SELECT source_path FROM symbol_assets WHERE id = ?1",
+                [&symbol_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute("DELETE FROM symbol_assets WHERE id = ?1", [&symbol_id])
+            .map_err(|error| error.to_string())?;
+        if let Some(source_path) = source_path {
+            let source = library_directory(path).join(source_path);
+            if source.is_file() {
+                fs::remove_file(source).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(removed)
 }
 
 pub fn seed_default_parts(path: &Path) -> Result<usize, String> {
@@ -751,6 +818,47 @@ mod tests {
     }
 
     #[test]
+    fn legacy_sample_housings_and_their_orphan_symbols_are_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("library.db");
+        initialize(&path).unwrap();
+        seed_default_parts(&path).unwrap();
+        for (legacy_id, canonical_id) in LEGACY_SAMPLE_PARTS {
+            let symbol = SymbolAsset {
+                id: format!("{legacy_id}-symbol"),
+                name: "Legacy housing drawing".into(),
+                source_format: "svg".into(),
+                source_name: format!("{legacy_id}.svg"),
+                view_box: "0 0 10 10".into(),
+                svg: "<svg viewBox=\"0 0 10 10\"></svg>".into(),
+            };
+            upsert_symbol_asset(&path, &symbol).unwrap();
+            let mut legacy = default_parts()
+                .unwrap()
+                .into_iter()
+                .find(|part| part.id == *canonical_id)
+                .unwrap();
+            legacy.id = (*legacy_id).into();
+            legacy.symbol_asset_id = Some(symbol.id.clone());
+            upsert(&path, &legacy).unwrap();
+        }
+
+        let parts = list(&path).unwrap();
+
+        for (legacy_id, canonical_id) in LEGACY_SAMPLE_PARTS {
+            assert!(parts.iter().any(|part| part.id == *canonical_id));
+            assert!(!parts.iter().any(|part| part.id == *legacy_id));
+            assert!(get_symbol_asset(&path, &format!("{legacy_id}-symbol"))
+                .unwrap()
+                .is_none());
+            assert!(!directory
+                .path()
+                .join(format!("assets/drawings/{legacy_id}-symbol.svg"))
+                .exists());
+        }
+    }
+
+    #[test]
     fn rotating_backup_keeps_requested_count_and_integrity_is_ok() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("library.db");
@@ -808,6 +916,11 @@ mod tests {
             .map(|part| part.id.as_str())
             .collect::<HashSet<_>>();
         assert_eq!(ids.len(), parts.len());
+        let part_numbers = parts
+            .iter()
+            .map(|part| part.part_number.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(part_numbers.len(), parts.len());
         for housing in parts
             .iter()
             .filter(|part| part.category == "housing" && part.manufacturer == "Molex")

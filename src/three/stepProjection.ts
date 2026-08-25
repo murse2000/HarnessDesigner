@@ -1,5 +1,5 @@
 import type { ModelAsset, ModelMesh, SymbolAsset } from "../domain/types";
-import { MathUtils, Quaternion, Vector3 } from "three";
+import { Euler, MathUtils, Quaternion, Vector3 } from "three";
 import type { ModelCableAxis, ModelPlacement } from "./modelPlacement";
 
 export type StepProjectionView = "front" | "back" | "left" | "right" | "top" | "bottom";
@@ -13,7 +13,7 @@ export interface StepProjectionSegment {
 
 type VectorTuple = [number, number, number];
 type FaceEdge = { from: VectorTuple; to: VectorTuple; normals: VectorTuple[] };
-type ProjectionPlacement = Pick<ModelPlacement, "cableAxis" | "rollDeg">;
+export type ProjectionPlacement = Pick<ModelPlacement, "cableAxis" | "rollDeg"> & Partial<Pick<ModelPlacement, "rotationXDeg" | "rotationYDeg" | "rotationZDeg">>;
 
 const viewAxes: Record<StepProjectionView, { horizontal: VectorTuple; vertical: VectorTuple; direction: VectorTuple }> = {
   front: { horizontal: [1, 0, 0], vertical: [0, -1, 0], direction: [0, 0, 1] },
@@ -57,7 +57,13 @@ function placementRotation(placement?: ProjectionPlacement) {
   const direction = new Vector3(0, 0, 1);
   const alignment = new Quaternion().setFromUnitVectors(cableAxisVector(placement.cableAxis), direction);
   const roll = new Quaternion().setFromAxisAngle(direction, MathUtils.degToRad(placement.rollDeg));
-  return roll.multiply(alignment);
+  const manual = new Quaternion().setFromEuler(new Euler(
+    MathUtils.degToRad(placement.rotationXDeg ?? 0),
+    MathUtils.degToRad(placement.rotationYDeg ?? 0),
+    MathUtils.degToRad(placement.rotationZDeg ?? 0),
+    "XYZ",
+  ));
+  return manual.multiply(roll.multiply(alignment));
 }
 
 function meshEdges(mesh: ModelMesh, scale: number, rotation: Quaternion | null): FaceEdge[] {

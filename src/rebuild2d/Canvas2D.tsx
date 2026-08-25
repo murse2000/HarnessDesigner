@@ -1,0 +1,1080 @@
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
+import { cableRunGeometry, connectorBounds, connectorHeight, connectorSize, CONNECTOR_HEADER_HEIGHT, CONNECTOR_INFO_HEIGHT, CONNECTOR_WIDTH, defaultRoutePoint, endpointPosition, orthogonalPath, pinPosition, PIN_ROW_HEIGHT, routedPath } from "./geometry";
+import { drawingPathData } from "./dxfSymbol";
+import type { ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D } from "./model";
+import type { Settings2D } from "./settings";
+
+export type CanvasSelection = {
+  componentIds: string[];
+  connectionIds: string[];
+  cableRunIds: string[];
+};
+
+type Props = {
+  harness: Harness2D;
+  projectNumber: string;
+  projectName: string;
+  settings: Settings2D;
+  selection: CanvasSelection;
+  selectedLabel: SelectedConnectorLabel | null;
+  selectedAnnotationId: string | null;
+  onSelectionChange: (selection: CanvasSelection) => void;
+  onSelectComponentLabel: (selection: SelectedConnectorLabel) => void;
+  onSelectAnnotation: (annotationId: string | null) => void;
+  onMoveSelection: (selection: CanvasSelection, delta: Point2D) => void;
+  onMoveConnectionRoute: (connectionId: string, point: Point2D) => void;
+  onMoveCableRunRoute: (cableRunId: string, point: Point2D) => void;
+  onMoveCableRunLabel: (cableRunId: string, offset: Point2D) => void;
+  onMoveComponentLabel: (componentId: string, label: ConnectorLabelKind, offset: Point2D) => void;
+  onMoveComponentPinMap: (componentId: string, offset: Point2D) => void;
+  onRenameConnection: (connectionId: string, reference: string) => void;
+  onUpdateProjectMetadata: (changes: Partial<Pick<Project2D, "projectNumber" | "name">>) => void;
+  onUpdateHarnessMetadata: (changes: Partial<Pick<Harness2D, "partNumber" | "name" | "revision">>) => void;
+  onUpdateTitleBlock: (changes: Partial<DrawingTitleBlock2D>) => void;
+  onUpdateAnnotation: (annotationId: string, changes: Partial<Omit<DrawingAnnotation2D, "id" | "kind">>) => void;
+  onConnect: (from: PinEndpoint2D, to: PinEndpoint2D) => void;
+  onMousePositionChange: (point: Point2D | null) => void;
+};
+
+type Viewport = {
+  zoom: number;
+  pan: Point2D;
+};
+
+type ComponentDrag = {
+  selection: CanvasSelection;
+  pointerStart: Point2D;
+  delta: Point2D;
+  pointerId: number;
+};
+
+type PanDrag = {
+  pointerStart: Point2D;
+  panStart: Point2D;
+};
+
+type DraftConnection = {
+  from: PinEndpoint2D;
+  pointer: Point2D;
+};
+
+type RouteDrag = {
+  kind: "connection" | "cableRun";
+  id: string;
+  pointerId: number;
+};
+
+export type ConnectorLabelKind = "referenceLabel" | "nameLabel";
+
+export type SelectedConnectorLabel = {
+  componentId: string;
+  label: ConnectorLabelKind;
+};
+
+type LabelDrag = {
+  componentId: string;
+  label: ConnectorLabelKind;
+  pointerStart: Point2D;
+  offsetStart: Point2D;
+  pointerId: number;
+};
+
+type PinMapDrag = {
+  componentId: string;
+  pointerStart: Point2D;
+  offsetStart: Point2D;
+  pointerId: number;
+};
+
+type CableLabelDrag = {
+  cableRunId: string;
+  pointerStart: Point2D;
+  offsetStart: Point2D;
+  pointerId: number;
+};
+
+type MarqueeDrag = {
+  start: Point2D;
+  current: Point2D;
+  pointerId: number;
+  additive: boolean;
+};
+
+type AnnotationDrag = {
+  annotationId: string;
+  mode: "move" | "resize";
+  pointerStart: Point2D;
+  original: DrawingAnnotation2D;
+  pointerId: number;
+};
+
+const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+export function Canvas2D({ harness, projectNumber, projectName, settings, selection, selectedLabel, selectedAnnotationId, onSelectionChange, onSelectComponentLabel, onSelectAnnotation, onMoveSelection, onMoveConnectionRoute, onMoveCableRunRoute, onMoveCableRunLabel, onMoveComponentLabel, onMoveComponentPinMap, onRenameConnection, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock, onUpdateAnnotation, onConnect, onMousePositionChange }: Props) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [viewport, setViewport] = useState<Viewport>({ zoom: 1, pan: { x: 40, y: 40 } });
+  const [componentDrag, setComponentDrag] = useState<ComponentDrag | null>(null);
+  const [panDrag, setPanDrag] = useState<PanDrag | null>(null);
+  const [previewPositions, setPreviewPositions] = useState<Record<string, Point2D>>({});
+  const [previewConnectionRoutes, setPreviewConnectionRoutes] = useState<Record<string, Point2D>>({});
+  const [previewCableRunRoutes, setPreviewCableRunRoutes] = useState<Record<string, Point2D>>({});
+  const [draftConnection, setDraftConnection] = useState<DraftConnection | null>(null);
+  const [routeDrag, setRouteDrag] = useState<RouteDrag | null>(null);
+  const [previewRoutePoint, setPreviewRoutePoint] = useState<Point2D | null>(null);
+  const [labelDrag, setLabelDrag] = useState<LabelDrag | null>(null);
+  const [previewLabelOffsets, setPreviewLabelOffsets] = useState<Record<string, Partial<Record<ConnectorLabelKind, Point2D>>>>({});
+  const [pinMapDrag, setPinMapDrag] = useState<PinMapDrag | null>(null);
+  const [previewPinMapOffsets, setPreviewPinMapOffsets] = useState<Record<string, Point2D>>({});
+  const [cableLabelDrag, setCableLabelDrag] = useState<CableLabelDrag | null>(null);
+  const [previewCableLabelOffsets, setPreviewCableLabelOffsets] = useState<Record<string, Point2D>>({});
+  const [selectedPinMapComponentId, setSelectedPinMapComponentId] = useState<string | null>(null);
+  const [marqueeDrag, setMarqueeDrag] = useState<MarqueeDrag | null>(null);
+  const [annotationDrag, setAnnotationDrag] = useState<AnnotationDrag | null>(null);
+  const [previewAnnotation, setPreviewAnnotation] = useState<DrawingAnnotation2D | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const snap = (value: number) => settings.gridSnap ? Math.round(value / settings.gridSize) * settings.gridSize : value;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space" && !isEditingElement(event.target)) {
+        event.preventDefault();
+        setSpacePressed(true);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") setSpacePressed(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = svgRef.current;
+    if (!canvas) return;
+    const measure = () => {
+      const bounds = canvas.getBoundingClientRect();
+      setCanvasSize({ width: bounds.width, height: bounds.height });
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
+  const visibleHarness = useMemo<Harness2D>(() => {
+    if (Object.keys(previewPositions).length === 0 && Object.keys(previewConnectionRoutes).length === 0 && Object.keys(previewCableRunRoutes).length === 0 && Object.keys(previewLabelOffsets).length === 0 && Object.keys(previewPinMapOffsets).length === 0 && Object.keys(previewCableLabelOffsets).length === 0) return harness;
+    const placements = { ...harness.drawing.componentPlacements };
+    Object.entries(previewPositions).forEach(([componentId, position]) => {
+      const current = placements[componentId];
+      if (current) placements[componentId] = { ...current, position };
+    });
+    Object.entries(previewLabelOffsets).forEach(([componentId, labels]) => {
+      const current = placements[componentId];
+      if (!current) return;
+      placements[componentId] = {
+        ...current,
+        referenceLabel: labels.referenceLabel ? { ...current.referenceLabel, offset: labels.referenceLabel } : current.referenceLabel,
+        nameLabel: labels.nameLabel ? { ...current.nameLabel, offset: labels.nameLabel } : current.nameLabel,
+      };
+    });
+    Object.entries(previewPinMapOffsets).forEach(([componentId, pinMapOffset]) => {
+      const current = placements[componentId];
+      if (current) placements[componentId] = { ...current, pinMapOffset };
+    });
+    const connectionRoutes = { ...harness.drawing.connectionRoutes };
+    Object.entries(previewConnectionRoutes).forEach(([connectionId, point]) => {
+      connectionRoutes[connectionId] = { point };
+    });
+    const cableRunRoutes = { ...harness.drawing.cableRunRoutes };
+    Object.entries(previewCableRunRoutes).forEach(([cableRunId, point]) => {
+      cableRunRoutes[cableRunId] = { point };
+    });
+    const cableRunLabelOffsets = { ...harness.drawing.cableRunLabelOffsets, ...previewCableLabelOffsets };
+    return { ...harness, drawing: { ...harness.drawing, componentPlacements: placements, connectionRoutes, cableRunRoutes, cableRunLabelOffsets } };
+  }, [harness, previewCableLabelOffsets, previewCableRunRoutes, previewConnectionRoutes, previewLabelOffsets, previewPinMapOffsets, previewPositions]);
+
+  const toWorld = (clientX: number, clientY: number): Point2D => {
+    const bounds = svgRef.current?.getBoundingClientRect();
+    if (!bounds) return { x: 0, y: 0 };
+    return {
+      x: (clientX - bounds.left - viewport.pan.x) / viewport.zoom,
+      y: (clientY - bounds.top - viewport.pan.y) / viewport.zoom,
+    };
+  };
+
+  const toScreen = (clientX: number, clientY: number): Point2D => {
+    const bounds = svgRef.current?.getBoundingClientRect();
+    return { x: clientX - (bounds?.left ?? 0), y: clientY - (bounds?.top ?? 0) };
+  };
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.button === 1 || (event.button === 0 && spacePressed)) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      setPanDrag({ pointerStart: toScreen(event.clientX, event.clientY), panStart: viewport.pan });
+      return;
+    }
+    if (event.button === 0) {
+      event.preventDefault();
+      onSelectAnnotation(null);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const start = toWorld(event.clientX, event.clientY);
+      setMarqueeDrag({ start, current: start, pointerId: event.pointerId, additive: event.shiftKey });
+    }
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (panDrag) {
+      const pointer = toScreen(event.clientX, event.clientY);
+      setViewport((current) => ({
+        ...current,
+        pan: {
+          x: panDrag.panStart.x + pointer.x - panDrag.pointerStart.x,
+          y: panDrag.panStart.y + pointer.y - panDrag.pointerStart.y,
+        },
+      }));
+    }
+    const world = toWorld(event.clientX, event.clientY);
+    onMousePositionChange(world);
+    if (componentDrag) {
+      const delta = { x: snap(world.x - componentDrag.pointerStart.x), y: snap(world.y - componentDrag.pointerStart.y) };
+      setComponentDrag({ ...componentDrag, delta });
+      setPreviewPositions(Object.fromEntries(componentDrag.selection.componentIds.flatMap((componentId) => {
+        const placement = harness.drawing.componentPlacements[componentId];
+        return placement ? [[componentId, { x: placement.position.x + delta.x, y: placement.position.y + delta.y }]] : [];
+      })));
+      setPreviewConnectionRoutes(Object.fromEntries(componentDrag.selection.connectionIds.flatMap((connectionId) => {
+        const route = harness.drawing.connectionRoutes?.[connectionId];
+        return route ? [[connectionId, { x: route.point.x + delta.x, y: route.point.y + delta.y }]] : [];
+      })));
+      setPreviewCableRunRoutes(Object.fromEntries(componentDrag.selection.cableRunIds.flatMap((cableRunId) => {
+        const route = harness.drawing.cableRunRoutes?.[cableRunId];
+        return route ? [[cableRunId, { x: route.point.x + delta.x, y: route.point.y + delta.y }]] : [];
+      })));
+    }
+    if (draftConnection) setDraftConnection({ ...draftConnection, pointer: world });
+    if (routeDrag) setPreviewRoutePoint({ x: snap(world.x), y: snap(world.y) });
+    if (labelDrag) {
+      const offset = {
+        x: snap(labelDrag.offsetStart.x + world.x - labelDrag.pointerStart.x),
+        y: snap(labelDrag.offsetStart.y + world.y - labelDrag.pointerStart.y),
+      };
+      setPreviewLabelOffsets({ [labelDrag.componentId]: { [labelDrag.label]: offset } });
+    }
+    if (pinMapDrag) {
+      const offset = {
+        x: snap(pinMapDrag.offsetStart.x + world.x - pinMapDrag.pointerStart.x),
+        y: snap(pinMapDrag.offsetStart.y + world.y - pinMapDrag.pointerStart.y),
+      };
+      setPreviewPinMapOffsets({ [pinMapDrag.componentId]: offset });
+    }
+    if (cableLabelDrag) {
+      const offset = {
+        x: snap(cableLabelDrag.offsetStart.x + world.x - cableLabelDrag.pointerStart.x),
+        y: snap(cableLabelDrag.offsetStart.y + world.y - cableLabelDrag.pointerStart.y),
+      };
+      setPreviewCableLabelOffsets({ [cableLabelDrag.cableRunId]: offset });
+    }
+    if (annotationDrag) {
+      const delta = {
+        x: snap(world.x - annotationDrag.pointerStart.x),
+        y: snap(world.y - annotationDrag.pointerStart.y),
+      };
+      setPreviewAnnotation(annotationDrag.mode === "move" ? {
+        ...annotationDrag.original,
+        position: {
+          x: annotationDrag.original.position.x + delta.x,
+          y: annotationDrag.original.position.y + delta.y,
+        },
+      } : {
+        ...annotationDrag.original,
+        width: Math.max(10, annotationDrag.original.width + delta.x),
+        height: Math.max(10, annotationDrag.original.height + delta.y),
+      });
+    }
+    if (marqueeDrag) setMarqueeDrag({ ...marqueeDrag, current: world });
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (componentDrag) {
+      if (event.type !== "pointercancel" && (componentDrag.delta.x !== 0 || componentDrag.delta.y !== 0)) {
+        onMoveSelection(componentDrag.selection, componentDrag.delta);
+      }
+      setComponentDrag(null);
+      setPreviewPositions({});
+      setPreviewConnectionRoutes({});
+      setPreviewCableRunRoutes({});
+      if (svgRef.current?.hasPointerCapture?.(componentDrag.pointerId)) {
+        svgRef.current.releasePointerCapture?.(componentDrag.pointerId);
+      }
+    }
+    if (panDrag) {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+      setPanDrag(null);
+    }
+    if (marqueeDrag) {
+      if (event.type !== "pointercancel") {
+        const current = toWorld(event.clientX, event.clientY);
+        const rectangle = normalizedRectangle(marqueeDrag.start, current);
+        const selected = rectangle.width < 3 && rectangle.height < 3
+          ? { componentIds: [], connectionIds: [], cableRunIds: [] }
+          : selectionInRectangle(visibleHarness, rectangle);
+        onSelectionChange(marqueeDrag.additive ? mergeSelection(selection, selected) : selected);
+      }
+      if (event.currentTarget.hasPointerCapture?.(marqueeDrag.pointerId)) {
+        event.currentTarget.releasePointerCapture?.(marqueeDrag.pointerId);
+      }
+      setMarqueeDrag(null);
+    }
+    if (routeDrag && previewRoutePoint) {
+      if (routeDrag.kind === "connection") onMoveConnectionRoute(routeDrag.id, previewRoutePoint);
+      else onMoveCableRunRoute(routeDrag.id, previewRoutePoint);
+    }
+    if (routeDrag && svgRef.current?.hasPointerCapture?.(routeDrag.pointerId)) {
+      svgRef.current.releasePointerCapture?.(routeDrag.pointerId);
+    }
+    setRouteDrag(null);
+    setPreviewRoutePoint(null);
+    if (labelDrag) {
+      const offset = previewLabelOffsets[labelDrag.componentId]?.[labelDrag.label];
+      if (offset) onMoveComponentLabel(labelDrag.componentId, labelDrag.label, offset);
+      if (svgRef.current?.hasPointerCapture?.(labelDrag.pointerId)) svgRef.current.releasePointerCapture?.(labelDrag.pointerId);
+    }
+    setLabelDrag(null);
+    setPreviewLabelOffsets({});
+    if (pinMapDrag) {
+      const offset = previewPinMapOffsets[pinMapDrag.componentId];
+      if (offset) onMoveComponentPinMap(pinMapDrag.componentId, offset);
+      if (svgRef.current?.hasPointerCapture?.(pinMapDrag.pointerId)) svgRef.current.releasePointerCapture?.(pinMapDrag.pointerId);
+    }
+    setPinMapDrag(null);
+    setPreviewPinMapOffsets({});
+    if (cableLabelDrag) {
+      const offset = previewCableLabelOffsets[cableLabelDrag.cableRunId];
+      if (offset) onMoveCableRunLabel(cableLabelDrag.cableRunId, offset);
+      if (svgRef.current?.hasPointerCapture?.(cableLabelDrag.pointerId)) svgRef.current.releasePointerCapture?.(cableLabelDrag.pointerId);
+    }
+    setCableLabelDrag(null);
+    setPreviewCableLabelOffsets({});
+    if (annotationDrag && previewAnnotation && event.type !== "pointercancel") {
+      onUpdateAnnotation(annotationDrag.annotationId, annotationDrag.mode === "move"
+        ? { position: previewAnnotation.position }
+        : { width: previewAnnotation.width, height: previewAnnotation.height });
+    }
+    if (annotationDrag && svgRef.current?.hasPointerCapture?.(annotationDrag.pointerId)) {
+      svgRef.current.releasePointerCapture?.(annotationDrag.pointerId);
+    }
+    setAnnotationDrag(null);
+    setPreviewAnnotation(null);
+    setDraftConnection(null);
+  };
+
+  const handleWheel = (event: WheelEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    const screen = toScreen(event.clientX, event.clientY);
+    setViewport((current) => {
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1);
+      const nextZoom = clamp(current.zoom * Math.exp(-clamp(delta, -100, 100) * 0.00055), 0.25, 4);
+      const worldX = (screen.x - current.pan.x) / current.zoom;
+      const worldY = (screen.y - current.pan.y) / current.zoom;
+      return {
+        zoom: nextZoom,
+        pan: { x: screen.x - worldX * nextZoom, y: screen.y - worldY * nextZoom },
+      };
+    });
+  };
+
+  const beginComponentDrag = (event: ReactPointerEvent<SVGGElement>, componentId: string) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedPinMapComponentId(null);
+    const placement = visibleHarness.drawing.componentPlacements[componentId];
+    if (!placement) return;
+    const selected = selection.componentIds.includes(componentId);
+    if (event.shiftKey && selected) {
+      onSelectionChange({ ...selection, componentIds: selection.componentIds.filter((id) => id !== componentId) });
+      return;
+    }
+    const dragSelection = selected
+      ? selection
+      : event.shiftKey
+        ? { ...selection, componentIds: [...selection.componentIds, componentId] }
+        : { componentIds: [componentId], connectionIds: [], cableRunIds: [] };
+    onSelectionChange(dragSelection);
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setComponentDrag({ selection: dragSelection, pointerStart: toWorld(event.clientX, event.clientY), delta: { x: 0, y: 0 }, pointerId: event.pointerId });
+  };
+
+  const beginConnection = (event: ReactPointerEvent<SVGCircleElement>, endpoint: PinEndpoint2D) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    const connector = visibleHarness.components.find((item) => item.id === endpoint.componentId);
+    const placement = visibleHarness.drawing.componentPlacements[endpoint.componentId];
+    if (!connector || !placement) return;
+    setDraftConnection({ from: endpoint, pointer: pinPosition(connector, placement, endpoint.pinId) });
+  };
+
+  const finishConnection = (event: ReactPointerEvent<SVGCircleElement>, to: PinEndpoint2D) => {
+    event.stopPropagation();
+    if (!draftConnection) return;
+    if (draftConnection.from.componentId !== to.componentId || draftConnection.from.pinId !== to.pinId) {
+      onConnect(draftConnection.from, to);
+    }
+    setDraftConnection(null);
+  };
+
+  const beginRouteDrag = (
+    event: ReactPointerEvent<SVGCircleElement>,
+    kind: RouteDrag["kind"],
+    id: string,
+    point: Point2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange(kind === "connection"
+      ? { componentIds: [], connectionIds: [id], cableRunIds: [] }
+      : { componentIds: [], connectionIds: [], cableRunIds: [id] });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setRouteDrag({ kind, id, pointerId: event.pointerId });
+    setPreviewRoutePoint(point);
+  };
+
+  const beginLabelDrag = (
+    event: ReactPointerEvent<SVGGElement>,
+    componentId: string,
+    label: ConnectorLabelKind,
+    offset: Point2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedPinMapComponentId(null);
+    onSelectionChange({ componentIds: [componentId], connectionIds: [], cableRunIds: [] });
+    onSelectComponentLabel({ componentId, label });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setLabelDrag({ componentId, label, pointerStart: toWorld(event.clientX, event.clientY), offsetStart: offset, pointerId: event.pointerId });
+  };
+
+  const beginPinMapDrag = (
+    event: ReactPointerEvent<SVGGElement>,
+    componentId: string,
+    offset: Point2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedPinMapComponentId(componentId);
+    onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [] });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setPinMapDrag({ componentId, pointerStart: toWorld(event.clientX, event.clientY), offsetStart: offset, pointerId: event.pointerId });
+  };
+
+  const beginCableLabelDrag = (
+    event: ReactPointerEvent<SVGGElement>,
+    cableRunId: string,
+    offset: Point2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [cableRunId] });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setCableLabelDrag({ cableRunId, pointerStart: toWorld(event.clientX, event.clientY), offsetStart: offset, pointerId: event.pointerId });
+  };
+
+  const beginAnnotationDrag = (
+    event: ReactPointerEvent<SVGGElement | SVGRectElement>,
+    annotation: DrawingAnnotation2D,
+    mode: AnnotationDrag["mode"],
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [] });
+    onSelectAnnotation(annotation.id);
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setAnnotationDrag({ annotationId: annotation.id, mode, pointerStart: toWorld(event.clientX, event.clientY), original: annotation, pointerId: event.pointerId });
+    setPreviewAnnotation(annotation);
+  };
+
+  const fitDrawing = () => {
+    if (harness.components.length === 0 || !svgRef.current) {
+      setViewport({ zoom: 1, pan: { x: 40, y: 40 } });
+      return;
+    }
+    const positions = harness.components.map((component) => connectorBounds(component, harness.drawing.componentPlacements[component.id]));
+    const minX = Math.min(...positions.map((item) => item.x));
+    const minY = Math.min(...positions.map((item) => item.y));
+    const maxX = Math.max(...positions.map((item) => item.x + item.width));
+    const maxY = Math.max(...positions.map((item) => item.y + item.height));
+    const bounds = svgRef.current.getBoundingClientRect();
+    const zoom = clamp(Math.min((bounds.width - 100) / (maxX - minX), (bounds.height - 100) / (maxY - minY)), 0.25, 1.5);
+    setViewport({
+      zoom,
+      pan: {
+        x: (bounds.width - (maxX - minX) * zoom) / 2 - minX * zoom,
+        y: (bounds.height - (maxY - minY) * zoom) / 2 - minY * zoom,
+      },
+    });
+  };
+
+  const horizontalRulerTicks = buildRulerTicks(viewport.pan.x, viewport.zoom, settings.lengthUnit, canvasSize.width);
+  const verticalRulerTicks = buildRulerTicks(viewport.pan.y, viewport.zoom, settings.lengthUnit, canvasSize.height);
+
+  return <div className={`hd2-canvas-wrap${settings.rulersVisible ? " has-rulers" : ""}`}>
+    {settings.rulersVisible && <>
+      <div className="hd2-ruler-corner">{settings.lengthUnit}</div>
+      <svg className="hd2-ruler hd2-ruler--horizontal" aria-label="가로 눈금자">
+        {horizontalRulerTicks.map((tick) => <g key={tick.world} transform={`translate(${tick.screen} 0)`}>
+          <line x1="0" y1="12" x2="0" y2="22" />
+          <text x="3" y="9">{tick.label}</text>
+        </g>)}
+      </svg>
+      <svg className="hd2-ruler hd2-ruler--vertical" aria-label="세로 눈금자">
+        {verticalRulerTicks.map((tick) => <g key={tick.world} transform={`translate(0 ${tick.screen})`}>
+          <line x1="20" y1="0" x2="30" y2="0" />
+          <text x="2" y="-3">{tick.label}</text>
+        </g>)}
+      </svg>
+    </>}
+    <div className="hd2-canvas-tools">
+      <button type="button" onClick={() => setViewport((current) => ({ ...current, zoom: clamp(current.zoom * 1.2, .25, 4) }))}>+</button>
+      <button type="button" onClick={() => setViewport((current) => ({ ...current, zoom: clamp(current.zoom / 1.2, .25, 4) }))}>−</button>
+      <button type="button" onClick={fitDrawing}>전체</button>
+      <span>{Math.round(viewport.zoom * 100)}%</span>
+    </div>
+    <svg
+      ref={svgRef}
+      className={`hd2-canvas${spacePressed || panDrag ? " is-panning" : ""}${marqueeDrag ? " is-selecting" : ""}`}
+      onPointerDown={handleCanvasPointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onPointerLeave={() => {
+        if (!componentDrag && !panDrag && !routeDrag && !marqueeDrag && !annotationDrag) onMousePositionChange(null);
+      }}
+      onWheel={handleWheel}
+      aria-label="하네스 2D 도면"
+    >
+      <defs>
+        <pattern id="hd2-grid-small" width={settings.gridSize} height={settings.gridSize} patternUnits="userSpaceOnUse">
+          <path d={`M ${settings.gridSize} 0 L 0 0 0 ${settings.gridSize}`} fill="none" stroke="var(--hd2-grid-small)" strokeWidth="0.6" />
+        </pattern>
+        <pattern id="hd2-grid" width={settings.gridSize * 5} height={settings.gridSize * 5} patternUnits="userSpaceOnUse">
+          <rect width={settings.gridSize * 5} height={settings.gridSize * 5} fill="url(#hd2-grid-small)" />
+          <path d={`M ${settings.gridSize * 5} 0 L 0 0 0 ${settings.gridSize * 5}`} fill="none" stroke="var(--hd2-grid-major)" strokeWidth="0.9" />
+        </pattern>
+      </defs>
+      <g transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
+        {settings.gridVisible && <rect className="hd2-grid" x={-5000} y={-5000} width={10000} height={10000} fill="url(#hd2-grid)" />}
+        {settings.drawingTemplateVisible && <DrawingTemplate
+          sheet={settings.drawingSheet}
+          projectNumber={projectNumber}
+          projectName={projectName}
+          harness={visibleHarness}
+          onUpdateProjectMetadata={onUpdateProjectMetadata}
+          onUpdateHarnessMetadata={onUpdateHarnessMetadata}
+          onUpdateTitleBlock={onUpdateTitleBlock}
+        />}
+        {marqueeDrag && <rect
+          className="hd2-marquee"
+          {...normalizedRectangle(marqueeDrag.start, marqueeDrag.current)}
+          aria-label="박스 선택 영역"
+        />}
+        <g className="hd2-wires">
+          {visibleHarness.cableRuns.map((cableRun) => {
+            const geometry = cableRunGeometry(visibleHarness, cableRun.id);
+            const selected = selection.cableRunIds.includes(cableRun.id);
+            const savedRoutePoint = visibleHarness.drawing.cableRunRoutes?.[cableRun.id]?.point;
+            const routePoint = routeDrag?.kind === "cableRun" && routeDrag.id === cableRun.id && previewRoutePoint
+              ? previewRoutePoint
+              : savedRoutePoint;
+            const handlePoint = routePoint ?? defaultRoutePoint(geometry.fromJunction, geometry.toJunction);
+            const jacketPath = routedPath(geometry.fromJunction, geometry.toJunction, routePoint);
+            const jacketWidth = clamp(cableRun.outerDiameterMm * 2, 8, 18);
+            const labelOffset = visibleHarness.drawing.cableRunLabelOffsets?.[cableRun.id] ?? { x: 0, y: -jacketWidth - 7 };
+            return <g key={cableRun.id}>
+              {geometry.connections.map((item) => {
+                const connection = visibleHarness.connections.find((candidate) => candidate.id === item.connectionId)!;
+                return <g key={item.connectionId}>
+                  <path className="hd2-cable-core" d={orthogonalPath(item.from, geometry.fromJunction)} style={{ stroke: wireColor(connection.color) }} />
+                  <path className="hd2-cable-core" d={orthogonalPath(geometry.toJunction, item.to)} style={{ stroke: wireColor(connection.color) }} />
+                </g>;
+              })}
+              <path className="hd2-cable-hit" d={jacketPath} aria-label={`${cableRun.reference} 외피`} onPointerDown={(event) => {
+                event.stopPropagation();
+                onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [cableRun.id] });
+              }} />
+              <path className={`hd2-cable-jacket${selected ? " is-selected" : ""}`} d={jacketPath} style={{ strokeWidth: jacketWidth }} />
+              <circle className="hd2-cable-collar" cx={geometry.fromJunction.x} cy={geometry.fromJunction.y} r={jacketWidth / 2 + 2} />
+              <circle className="hd2-cable-collar" cx={geometry.toJunction.x} cy={geometry.toJunction.y} r={jacketWidth / 2 + 2} />
+              <g
+                className={`hd2-cable-label${selected ? " is-selected" : ""}`}
+                transform={`translate(${handlePoint.x + labelOffset.x} ${handlePoint.y + labelOffset.y})`}
+                aria-label={`${cableRun.reference} 케이블 라벨`}
+                onPointerDown={(event) => beginCableLabelDrag(event, cableRun.id, labelOffset)}
+              >
+                <text>{cableRun.reference} · {cableRun.partNumber} · {cableRun.lengthMm} mm</text>
+              </g>
+              {selected && <circle
+                className="hd2-route-handle"
+                cx={handlePoint.x}
+                cy={handlePoint.y}
+                r="8"
+                aria-label={`${cableRun.reference} 외피 경로 핸들`}
+                onPointerDown={(event) => beginRouteDrag(event, "cableRun", cableRun.id, handlePoint)}
+              />}
+            </g>;
+          })}
+          {visibleHarness.connections.filter((connection) => !connection.cableRunId).map((connection) => {
+            const from = endpointPosition(visibleHarness, connection.from);
+            const to = endpointPosition(visibleHarness, connection.to);
+            const selected = selection.connectionIds.includes(connection.id);
+            const savedRoutePoint = visibleHarness.drawing.connectionRoutes?.[connection.id]?.point;
+            const routePoint = routeDrag?.kind === "connection" && routeDrag.id === connection.id && previewRoutePoint
+              ? previewRoutePoint
+              : savedRoutePoint;
+            const handlePoint = routePoint ?? defaultRoutePoint(from, to);
+            const path = routedPath(from, to, routePoint);
+            return <g key={connection.id}>
+              <path className="hd2-wire-hit" d={path} aria-label={`${connection.reference} 전선`} onPointerDown={(event) => {
+                event.stopPropagation();
+                onSelectionChange({ componentIds: [], connectionIds: [connection.id], cableRunIds: [] });
+              }} />
+              <path className={`hd2-wire${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColor(connection.color) }} />
+              <text className="hd2-wire-label" x={handlePoint.x} y={handlePoint.y - 7}>{connection.reference}</text>
+              {selected && <circle
+                className="hd2-route-handle"
+                cx={handlePoint.x}
+                cy={handlePoint.y}
+                r="8"
+                aria-label={`${connection.reference} 전선 경로 핸들`}
+                onPointerDown={(event) => beginRouteDrag(event, "connection", connection.id, handlePoint)}
+              />}
+            </g>;
+          })}
+          {draftConnection && <path className="hd2-wire hd2-wire--draft" d={orthogonalPath(endpointPosition(visibleHarness, draftConnection.from), draftConnection.pointer)} />}
+        </g>
+        {visibleHarness.components.map((connector) => {
+          const placement = visibleHarness.drawing.componentPlacements[connector.id];
+          const selected = selection.componentIds.includes(connector.id);
+          const height = connectorHeight(connector);
+          const size = connectorSize(connector);
+          const referenceOffset = connectorLabelOffset(connector, placement, "referenceLabel");
+          const nameOffset = connectorLabelOffset(connector, placement, "nameLabel");
+          const pinMapRows = connectorPinMapRows(visibleHarness, connector.id);
+          const bounds = connectorBounds(connector, placement);
+          const pinMapOffset = placement.pinMapOffset ?? {
+            x: placement.pinSide === "right" ? bounds.x - placement.position.x + bounds.width + 12 : bounds.x - placement.position.x - 152,
+            y: bounds.y - placement.position.y,
+          };
+          return <g
+            key={connector.id}
+            className={`hd2-connector${selected ? " is-selected" : ""}`}
+            transform={`translate(${placement.position.x} ${placement.position.y})`}
+            onPointerDown={(event) => beginComponentDrag(event, connector.id)}
+            data-testid={`connector-${connector.reference}`}
+          >
+            <g transform={placement.rotation ? `rotate(${placement.rotation} ${size.width / 2} ${size.height / 2})` : undefined} data-testid={`connector-geometry-${connector.reference}`}>
+            {connector.drawing ? <>
+              <rect className={`hd2-part-symbol-hit${selected ? " is-selected" : ""}`} width={size.width} height={size.height} />
+              <g className="hd2-part-symbol" transform={placement.pinSide === "left" ? `translate(${size.width} 0) scale(-1 1)` : undefined}>
+                <svg width={size.width} height={size.height} viewBox={`0 0 ${connector.drawing.widthMm} ${connector.drawing.heightMm}`} preserveAspectRatio="none" overflow="hidden">
+                  {connector.drawing.imageDataUrl && <image href={connector.drawing.imageDataUrl} width={connector.drawing.widthMm} height={connector.drawing.heightMm} preserveAspectRatio="none" />}
+                  {connector.drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} vectorEffect="non-scaling-stroke" style={{ stroke: "#173f59", strokeWidth: 1.15 * (connector.drawing!.outlineStrength ?? 1) }} />)}
+                </svg>
+              </g>
+              {connector.pins.map((pin) => {
+                if (!pin.anchor) return null;
+                const pinPoint = pinPosition(connector, { position: { x: 0, y: 0 }, pinSide: placement.pinSide, rotation: 0 }, pin.id);
+                const usage = visibleHarness.connections.filter((connection) => (
+                  (connection.from.componentId === connector.id && connection.from.pinId === pin.id)
+                  || (connection.to.componentId === connector.id && connection.to.pinId === pin.id)
+                )).length;
+                return <g key={pin.id}>
+                  <circle className={`hd2-pin-port hd2-symbol-pin-port${usage > 0 ? " is-used" : ""}`} cx={pinPoint.x} cy={pinPoint.y} r="3.5" />
+                  <circle className="hd2-pin-hit" cx={pinPoint.x} cy={pinPoint.y} r="10" aria-label={`${connector.reference} 핀 ${pin.number}`} onPointerDown={(event) => beginConnection(event, { componentId: connector.id, pinId: pin.id })} onPointerUp={(event) => finishConnection(event, { componentId: connector.id, pinId: pin.id })} />
+                  <text className="hd2-symbol-pin-number" x={pinPoint.x + (placement.pinSide === "left" ? -7 : 7)} y={pinPoint.y - 5} textAnchor={placement.pinSide === "left" ? "end" : "start"}>{pin.number}</text>
+                </g>;
+              })}
+            </> : <>
+            <rect className="hd2-connector-body" width={CONNECTOR_WIDTH} height={height} rx="5" />
+            <rect className="hd2-connector-header" width={CONNECTOR_WIDTH} height={CONNECTOR_HEADER_HEIGHT} rx="5" />
+            <path d={`M 0 ${CONNECTOR_HEADER_HEIGHT} H ${CONNECTOR_WIDTH}`} />
+            <text className="hd2-pin-count" x={CONNECTOR_WIDTH - 11} y="18" textAnchor="end">{connector.pins.length}P</text>
+            <path d={`M 0 ${CONNECTOR_HEADER_HEIGHT + CONNECTOR_INFO_HEIGHT} H ${CONNECTOR_WIDTH}`} />
+            {connector.pins.map((pin, index) => {
+              const y = CONNECTOR_HEADER_HEIGHT + CONNECTOR_INFO_HEIGHT + index * PIN_ROW_HEIGHT;
+              const pinX = placement.pinSide === "right" ? CONNECTOR_WIDTH : 0;
+              const usage = visibleHarness.connections.filter((connection) => (
+                (connection.from.componentId === connector.id && connection.from.pinId === pin.id)
+                || (connection.to.componentId === connector.id && connection.to.pinId === pin.id)
+              )).length;
+              return <g key={pin.id}>
+                <rect className={index % 2 === 0 ? "hd2-pin-row is-even" : "hd2-pin-row"} x="1" y={y} width={CONNECTOR_WIDTH - 2} height={PIN_ROW_HEIGHT} />
+                <text className="hd2-pin-number" x={placement.pinSide === "right" ? 11 : CONNECTOR_WIDTH - 11} y={y + 15} textAnchor={placement.pinSide === "right" ? "start" : "end"}>{pin.number}</text>
+                <text className="hd2-pin-name" x={placement.pinSide === "right" ? 40 : CONNECTOR_WIDTH - 40} y={y + 15} textAnchor={placement.pinSide === "right" ? "start" : "end"}>{pin.name}</text>
+                <text className="hd2-pin-usage" x={placement.pinSide === "right" ? CONNECTOR_WIDTH - 16 : 16} y={y + 15} textAnchor={placement.pinSide === "right" ? "end" : "start"}>{usage}</text>
+                <circle className={`hd2-pin-port${usage > 0 ? " is-used" : ""}`} cx={pinX} cy={y + PIN_ROW_HEIGHT / 2} r="5" />
+                <circle
+                  className="hd2-pin-hit"
+                  cx={pinX}
+                  cy={y + PIN_ROW_HEIGHT / 2}
+                  r="13"
+                  aria-label={`${connector.reference} 핀 ${pin.number}`}
+                  onPointerDown={(event) => beginConnection(event, { componentId: connector.id, pinId: pin.id })}
+                  onPointerUp={(event) => finishConnection(event, { componentId: connector.id, pinId: pin.id })}
+                />
+              </g>;
+            })}
+            </>}
+            </g>
+            <g
+              className={`hd2-connector-label${selectedLabel?.componentId === connector.id && selectedLabel.label === "referenceLabel" ? " is-selected" : ""}`}
+              aria-label={`${connector.reference} 참조 라벨`}
+              transform={`translate(${referenceOffset.x} ${referenceOffset.y}) rotate(${placement.referenceLabel?.rotation ?? 0})`}
+              onPointerDown={(event) => beginLabelDrag(event, connector.id, "referenceLabel", referenceOffset)}
+            >
+              <text className="hd2-symbol-reference" textAnchor="middle">{connector.reference} · {connector.partNumber}</text>
+            </g>
+            <g
+              className={`hd2-connector-label${selectedLabel?.componentId === connector.id && selectedLabel.label === "nameLabel" ? " is-selected" : ""}`}
+              aria-label={`${connector.reference} 이름 라벨`}
+              transform={`translate(${nameOffset.x} ${nameOffset.y}) rotate(${placement.nameLabel?.rotation ?? 0})`}
+              onPointerDown={(event) => beginLabelDrag(event, connector.id, "nameLabel", nameOffset)}
+            >
+              <text className="hd2-symbol-name" textAnchor="middle">{connector.name}</text>
+            </g>
+            {pinMapRows.length > 0 && <g
+              className={`hd2-connector-pin-map${selectedPinMapComponentId === connector.id ? " is-selected" : ""}`}
+              transform={`translate(${pinMapOffset.x} ${pinMapOffset.y})`}
+              aria-label={`${connector.reference} 커넥터 핀맵`}
+              onPointerDown={(event) => beginPinMapDrag(event, connector.id, pinMapOffset)}
+            >
+              <rect width="190" height={20 + pinMapRows.length * 16} rx="3" />
+              <text className="hd2-connector-pin-map-title" x="7" y="13">PIN MAP · {connector.reference}</text>
+              {pinMapRows.map((row, index) => <g key={`${row.connectionId}-${row.pinNumber}`} transform={`translate(0 ${20 + index * 16})`}>
+                <line x1="0" y1="0" x2="190" y2="0" />
+                <text x="7" y="12">{row.pinNumber}</text>
+                <text x="29" y="12">{row.target}</text>
+                <foreignObject x="82" y="0" width="86" height="16">
+                  <PinMapWireName
+                    value={row.reference}
+                    ariaLabel={`${connector.reference} 핀 ${row.pinNumber} 선 이름`}
+                    onCommit={(reference) => onRenameConnection(row.connectionId, reference)}
+                  />
+                </foreignObject>
+                <circle cx="180" cy="8" r="4" style={{ fill: wireColor(row.color) }} />
+              </g>)}
+            </g>}
+          </g>;
+        })}
+        {(visibleHarness.drawing.annotations ?? []).map((savedAnnotation) => {
+          const annotation = previewAnnotation?.id === savedAnnotation.id ? previewAnnotation : savedAnnotation;
+          const selected = selectedAnnotationId === annotation.id;
+          return <DrawingAnnotation
+            key={annotation.id}
+            annotation={annotation}
+            selected={selected}
+            onMove={(event) => beginAnnotationDrag(event, annotation, "move")}
+            onResize={(event) => beginAnnotationDrag(event, annotation, "resize")}
+          />;
+        })}
+      </g>
+    </svg>
+    {harness.components.length === 0 && (harness.drawing.annotations?.length ?? 0) === 0 && <div className="hd2-empty-canvas">
+      <strong>빈 2D 도면</strong>
+      <span>상단의 커넥터 추가 버튼으로 시작하세요.</span>
+    </div>}
+  </div>;
+}
+
+function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
+  annotation: DrawingAnnotation2D;
+  selected: boolean;
+  onMove: (event: ReactPointerEvent<SVGGElement>) => void;
+  onResize: (event: ReactPointerEvent<SVGRectElement>) => void;
+}) {
+  const { x, y } = annotation.position;
+  const label = annotation.text || annotation.kind;
+  return <g
+    className={`hd2-annotation hd2-annotation--${annotation.kind}${selected ? " is-selected" : ""}`}
+    transform={`translate(${x} ${y})`}
+    aria-label={`${label} 주석`}
+    onPointerDown={onMove}
+  >
+    <rect className="hd2-annotation-hit" width={annotation.width} height={annotation.height} />
+    {annotation.kind === "label" && <>
+      <rect width={annotation.width} height={annotation.height} rx={Math.min(8, annotation.height / 2)} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />
+      <text x={annotation.width / 2} y={annotation.height / 2} dominantBaseline="middle" textAnchor="middle" style={{ fill: annotation.textColor, fontSize: annotation.fontSize }}>{annotation.text}</text>
+    </>}
+    {annotation.kind === "text" && <text x="0" y={annotation.fontSize} style={{ fill: annotation.textColor, fontSize: annotation.fontSize }}>{annotation.text}</text>}
+    {annotation.kind === "rectangle" && <rect width={annotation.width} height={annotation.height} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
+    {annotation.kind === "ellipse" && <ellipse cx={annotation.width / 2} cy={annotation.height / 2} rx={annotation.width / 2} ry={annotation.height / 2} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
+    {annotation.kind === "image" && annotation.imageDataUrl && <image href={annotation.imageDataUrl} width={annotation.width} height={annotation.height} preserveAspectRatio="xMidYMid meet" />}
+    {selected && <>
+      <rect className="hd2-annotation-selection" x="-3" y="-3" width={annotation.width + 6} height={annotation.height + 6} />
+      <rect
+        className="hd2-annotation-resize"
+        x={annotation.width - 5}
+        y={annotation.height - 5}
+        width="10"
+        height="10"
+        aria-label={`${label} 크기 조정`}
+        onPointerDown={(event) => onResize(event)}
+      />
+    </>}
+  </g>;
+}
+
+function connectorLabelOffset(connector: Connector2D, placement: ComponentPlacement2D, label: ConnectorLabelKind): Point2D {
+  const saved = placement[label]?.offset;
+  if (saved) return saved;
+  const size = connectorSize(connector);
+  return label === "referenceLabel"
+    ? { x: size.width / 2, y: -9 }
+    : { x: size.width / 2, y: size.height + 14 };
+}
+
+function connectorPinMapRows(harness: Harness2D, componentId: string) {
+  const connector = harness.components.find((item) => item.id === componentId);
+  if (!connector) return [];
+  return connector.pins.flatMap((pin) => harness.connections.flatMap((connection) => {
+    const fromThisPin = connection.from.componentId === componentId && connection.from.pinId === pin.id;
+    const toThisPin = connection.to.componentId === componentId && connection.to.pinId === pin.id;
+    if (!fromThisPin && !toThisPin) return [];
+    const otherEndpoint = fromThisPin ? connection.to : connection.from;
+    const otherConnector = harness.components.find((item) => item.id === otherEndpoint.componentId);
+    const otherPin = otherConnector?.pins.find((item) => item.id === otherEndpoint.pinId);
+    return [{
+      connectionId: connection.id,
+      pinNumber: pin.number,
+      target: `${otherConnector?.reference ?? "?"}:${otherPin?.number ?? "?"}`,
+      reference: connection.reference,
+      color: connection.color,
+    }];
+  }));
+}
+
+function PinMapWireName({ value, ariaLabel, onCommit }: { value: string; ariaLabel: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+  return <input
+    className="hd2-connector-pin-map-input"
+    aria-label={ariaLabel}
+    value={draft}
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={(event) => event.stopPropagation()}
+    onChange={(event) => setDraft(event.target.value)}
+    onBlur={commit}
+    onKeyDown={(event) => {
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") {
+        setDraft(value);
+        event.currentTarget.blur();
+      }
+    }}
+  />;
+}
+
+function DrawingTemplate({ sheet, projectNumber, projectName, harness, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock }: {
+  sheet: Settings2D["drawingSheet"];
+  projectNumber: string;
+  projectName: string;
+  harness: Harness2D;
+  onUpdateProjectMetadata: Props["onUpdateProjectMetadata"];
+  onUpdateHarnessMetadata: Props["onUpdateHarnessMetadata"];
+  onUpdateTitleBlock: Props["onUpdateTitleBlock"];
+}) {
+  const dimensions = sheet === "A3" ? { width: 420, height: 297 } : sheet === "A2" ? { width: 594, height: 420 } : { width: 841, height: 594 };
+  const inset = 10;
+  const titleWidth = Math.min(340, dimensions.width * 0.58);
+  const titleHeight = 78;
+  const titleX = dimensions.width - inset - titleWidth;
+  const titleY = dimensions.height - inset - titleHeight;
+  const columns = Array.from({ length: 8 }, (_, index) => ({
+    label: String.fromCharCode(65 + index),
+    x: inset + (dimensions.width - inset * 2) * (index + 0.5) / 8,
+  }));
+  const rows = Array.from({ length: 6 }, (_, index) => ({
+    label: String(index + 1),
+    y: inset + (dimensions.height - inset * 2) * (index + 0.5) / 6,
+  }));
+  return <g className="hd2-drawing-template" aria-label="도면 템플릿">
+    <rect x="0" y="0" width={dimensions.width} height={dimensions.height} />
+    <rect x={inset} y={inset} width={dimensions.width - inset * 2} height={dimensions.height - inset * 2} />
+    {columns.map((column) => <text key={column.label} x={column.x} y="7" textAnchor="middle">{column.label}</text>)}
+    {rows.map((row) => <text key={row.label} x="5" y={row.y} textAnchor="middle">{row.label}</text>)}
+    <g className="hd2-title-block" transform={`translate(${titleX} ${titleY})`}>
+      <rect width={titleWidth} height={titleHeight} />
+      <line x1="0" y1="20" x2={titleWidth} y2="20" />
+      <line x1="0" y1="40" x2={titleWidth} y2="40" />
+      <line x1="0" y1="58" x2={titleWidth} y2="58" />
+      <line x1={titleWidth * 0.72} y1="20" x2={titleWidth * 0.72} y2="58" />
+      {[1, 2, 3].map((index) => <line key={index} x1={titleWidth * index / 4} y1="58" x2={titleWidth * index / 4} y2={titleHeight} />)}
+      <text className="hd2-title-caption" x="5" y="7">PROJECT</text>
+      <InlineTitleInput x={4} y={15} width={titleWidth * 0.25 - 6} value={projectNumber} ariaLabel="도면 프로젝트 번호" onCommit={(value) => onUpdateProjectMetadata({ projectNumber: value })} />
+      <InlineTitleInput x={titleWidth * 0.25} y={15} width={titleWidth * 0.47 - 4} value={projectName} ariaLabel="도면 프로젝트 이름" onCommit={(value) => onUpdateProjectMetadata({ name: value })} />
+      <text className="hd2-title-caption" x="5" y="27">HARNESS</text>
+      <InlineTitleInput x={4} y={35} width={titleWidth * 0.25 - 6} value={harness.partNumber} ariaLabel="도면 하네스 파트번호" onCommit={(value) => onUpdateHarnessMetadata({ partNumber: value })} />
+      <InlineTitleInput x={titleWidth * 0.25} y={35} width={titleWidth * 0.47 - 4} value={harness.name} ariaLabel="도면 하네스 이름" onCommit={(value) => onUpdateHarnessMetadata({ name: value })} />
+      <text className="hd2-title-caption" x={titleWidth * 0.72 + 5} y="27">REVISION</text>
+      <InlineTitleInput x={titleWidth * 0.72 + 4} y={35} width={titleWidth * 0.28 - 8} value={harness.revision} ariaLabel="도면 리비전" onCommit={(value) => onUpdateHarnessMetadata({ revision: value })} />
+      <text className="hd2-title-caption" x="5" y="47">DRAWING TITLE</text>
+      <InlineTitleInput x={4} y={55} width={titleWidth * 0.72 - 8} value={harness.drawing.titleBlock?.drawingTitle ?? "HARNESS ASSEMBLY DRAWING"} ariaLabel="도면 제목" onCommit={(value) => onUpdateTitleBlock({ drawingTitle: value })} />
+      <text className="hd2-title-caption" x={titleWidth * 0.72 + 5} y="47">SHEET / UNIT</text>
+      <text x={titleWidth * 0.72 + 5} y="55">{sheet} · mm</text>
+      <TitleBlockField x={0} width={titleWidth / 4} label="DATE" value={harness.drawing.titleBlock?.createdDate ?? ""} ariaLabel="도면 생성일" onCommit={(value) => onUpdateTitleBlock({ createdDate: value })} />
+      <TitleBlockField x={titleWidth / 4} width={titleWidth / 4} label="DRAWN" value={harness.drawing.titleBlock?.createdBy ?? ""} ariaLabel="도면 작성자" onCommit={(value) => onUpdateTitleBlock({ createdBy: value })} />
+      <TitleBlockField x={titleWidth / 2} width={titleWidth / 4} label="CHECKED" value={harness.drawing.titleBlock?.reviewedBy ?? ""} ariaLabel="도면 검토자" onCommit={(value) => onUpdateTitleBlock({ reviewedBy: value })} />
+      <TitleBlockField x={titleWidth * 3 / 4} width={titleWidth / 4} label="APPROVED" value={harness.drawing.titleBlock?.approvedBy ?? ""} ariaLabel="도면 승인자" onCommit={(value) => onUpdateTitleBlock({ approvedBy: value })} />
+    </g>
+  </g>;
+}
+
+function TitleBlockField({ x, width, label, value, ariaLabel, onCommit }: { x: number; width: number; label: string; value: string; ariaLabel: string; onCommit: (value: string) => void }) {
+  return <g transform={`translate(${x} 58)`}>
+    <text className="hd2-title-caption" x="4" y="7">{label}</text>
+    <InlineTitleInput x={3} y={15} width={width - 6} value={value} ariaLabel={ariaLabel} onCommit={onCommit} centered />
+  </g>;
+}
+
+function InlineTitleInput({ x, y, width, value, ariaLabel, onCommit, centered = false }: { x: number; y: number; width: number; value: string; ariaLabel: string; onCommit: (value: string) => void; centered?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const cancelCommitRef = useRef(false);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (!cancelCommitRef.current && draft !== value) onCommit(draft.trim());
+    cancelCommitRef.current = false;
+    setEditing(false);
+  };
+  if (!editing) return <text
+    className="hd2-title-value"
+    x={centered ? x + width / 2 : x + 2}
+    y={y}
+    textAnchor={centered ? "middle" : "start"}
+    aria-label={ariaLabel}
+    onPointerDown={(event) => event.stopPropagation()}
+    onClick={(event) => { event.stopPropagation(); setEditing(true); }}
+  >{draft || "—"}</text>;
+  return <foreignObject x={x} y={y - 11} width={width} height="13" className="hd2-title-input-wrap">
+    <input
+      className={`hd2-title-input${centered ? " is-centered" : ""}`}
+      aria-label={ariaLabel}
+      value={draft}
+      placeholder="—"
+      autoFocus
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          cancelCommitRef.current = true;
+          setDraft(value);
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  </foreignObject>;
+}
+
+type RulerTick = {
+  world: number;
+  screen: number;
+  label: string;
+};
+
+function buildRulerTicks(pan: number, zoom: number, unit: Settings2D["lengthUnit"], length: number): RulerTick[] {
+  const millimeterSteps = unit === "in"
+    ? [6.35, 12.7, 25.4, 50.8, 127, 254, 508, 1270, 2540]
+    : [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000];
+  const step = millimeterSteps.find((candidate) => candidate * zoom >= 55) ?? millimeterSteps.at(-1)!;
+  const first = Math.floor((-pan / zoom) / step) * step;
+  const last = (length - pan) / zoom;
+  const ticks: RulerTick[] = [];
+  for (let world = first; world <= last; world += step) {
+    const displayed = displayRulerValue(world, unit);
+    ticks.push({ world, screen: pan + world * zoom, label: displayed });
+  }
+  return ticks;
+}
+
+function displayRulerValue(millimeters: number, unit: Settings2D["lengthUnit"]) {
+  const value = unit === "in" ? millimeters / 25.4 : millimeters;
+  const rounded = Math.abs(value) < 0.0001 ? 0 : value;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function wireColor(code: string) {
+  const colors: Record<string, string> = {
+    BK: "#20262c", RD: "#d73c3c", BU: "#2c7ec8", GN: "#28965a", WH: "#cbd3da",
+    YE: "#d9a514", OR: "#e87924", BN: "#7a4d2c", VT: "#7557a6", GY: "#788590",
+  };
+  return colors[code.toUpperCase()] ?? "#176b9b";
+}
+
+function isEditingElement(target: EventTarget | null) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
+type SelectionRectangle = Point2D & { width: number; height: number };
+
+function normalizedRectangle(start: Point2D, end: Point2D): SelectionRectangle {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function selectionInRectangle(harness: Harness2D, rectangle: SelectionRectangle): CanvasSelection {
+  const containsPoint = (point: Point2D) => (
+    point.x >= rectangle.x
+    && point.x <= rectangle.x + rectangle.width
+    && point.y >= rectangle.y
+    && point.y <= rectangle.y + rectangle.height
+  );
+  const componentIds = harness.components.filter((component) => {
+    const placement = harness.drawing.componentPlacements[component.id];
+    const bounds = connectorBounds(component, placement);
+    return bounds.x >= rectangle.x
+      && bounds.y >= rectangle.y
+      && bounds.x + bounds.width <= rectangle.x + rectangle.width
+      && bounds.y + bounds.height <= rectangle.y + rectangle.height;
+  }).map((component) => component.id);
+  const connectionIds = harness.connections.filter((connection) => (
+    containsPoint(endpointPosition(harness, connection.from))
+    && containsPoint(endpointPosition(harness, connection.to))
+  )).map((connection) => connection.id);
+  const cableRunIds = harness.cableRuns.filter((cableRun) => {
+    const geometry = cableRunGeometry(harness, cableRun.id);
+    return containsPoint(geometry.fromJunction) && containsPoint(geometry.toJunction);
+  }).map((cableRun) => cableRun.id);
+  return { componentIds, connectionIds, cableRunIds };
+}
+
+function mergeSelection(current: CanvasSelection, added: CanvasSelection): CanvasSelection {
+  return {
+    componentIds: [...new Set([...current.componentIds, ...added.componentIds])],
+    connectionIds: [...new Set([...current.connectionIds, ...added.connectionIds])],
+    cableRunIds: [...new Set([...current.cableRunIds, ...added.cableRunIds])],
+  };
+}

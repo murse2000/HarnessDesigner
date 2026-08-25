@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { buildAccessoryDrawingPlacements, updateAccessoryDrawingSize } from "./accessoryDrawing";
 
 describe("2D 부자재 배치", () => {
   it("노드·구간·미지정 부자재를 연결 대상 주변에 배치한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     harness.accessories = [
       { id: "node-accessory", partId: "part-label", quantity: 1, nodeId: "node-j1", note: "J1 라벨" },
@@ -21,7 +21,7 @@ describe("2D 부자재 배치", () => {
   });
 
   it("사용자가 이동한 도면 위치를 우선한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     harness.accessories = [{
       id: "moved-accessory",
@@ -36,7 +36,7 @@ describe("2D 부자재 배치", () => {
   });
 
   it("라벨의 사용자 크기와 기본 크기를 제공한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     harness.accessories = [
       { id: "default-label", partId: "part-label", quantity: 1, note: "기본" },

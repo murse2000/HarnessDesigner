@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import {
   compareHarnessToLastRelease,
   releaseHarness,
@@ -10,7 +10,7 @@ import {
 
 describe("하네스 릴리즈", () => {
   it("검토, 릴리즈, 변경 비교와 다음 리비전 전환을 보존한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
 
     submitHarnessForReview(project, harness.id);
@@ -32,7 +32,7 @@ describe("하네스 릴리즈", () => {
   });
 
   it("릴리즈 상태의 설계 변경은 차단하고 다음 리비전 전환은 허용한다", () => {
-    const before = createProject();
+    const before = createSampleProject();
     submitHarnessForReview(before, before.harnesses[0].id);
     releaseHarness(before, before.harnesses[0].id, "QA", "", "2026-08-17T00:00:00.000Z");
 

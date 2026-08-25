@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import occtImportJs from "occt-import-js";
-import { createProject } from "../domain/sample";
+import { createSampleProject } from "../test/sampleProject";
 import { buildHarnessCadData, buildHarnessStep } from "./step3d";
 
 describe("3D STEP 내보내기", () => {
   it("하네스 노드와 폐곡면 전선을 AP242 형상으로 만든다", () => {
-    const project = createProject("STEP TEST");
+    const project = createSampleProject("STEP TEST");
     const harness = project.harnesses[0];
     const data = buildHarnessCadData(project, harness);
     const step = buildHarnessStep(project, harness);
@@ -21,7 +21,7 @@ describe("3D STEP 내보내기", () => {
   });
 
   it("실드 멀티코어 케이블의 외피와 실드층을 함께 만든다", () => {
-    const project = createProject("SHIELDED CABLE");
+    const project = createSampleProject("SHIELDED CABLE");
     project.parts.push({
       id: "part-shielded-cable",
       partNumber: "SHIELD-4C",
@@ -40,7 +40,7 @@ describe("3D STEP 내보내기", () => {
   });
 
   it("생성한 STEP을 OpenCascade가 다시 읽는다", async () => {
-    const project = createProject("STEP ROUND TRIP");
+    const project = createSampleProject("STEP ROUND TRIP");
     const step = buildHarnessStep(project, project.harnesses[0]);
     const cwd = (globalThis as unknown as { process: { cwd: () => string } }).process.cwd();
     const occt = await occtImportJs({ locateFile: () => `${cwd}/node_modules/occt-import-js/dist/occt-import-js.wasm` });
@@ -50,7 +50,7 @@ describe("3D STEP 내보내기", () => {
   });
 
   it("형상이 없는 프로젝트는 빈 STEP을 만들지 않는다", () => {
-    const project = createProject("EMPTY");
+    const project = createSampleProject("EMPTY");
     project.harnesses[0].nodes = [];
     project.harnesses[0].segments = [];
     project.harnesses[0].conductors = [];

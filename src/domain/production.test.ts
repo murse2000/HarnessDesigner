@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { applyConnectionImport, buildBundleMetrics, buildCostRows, buildCostSummary, buildEquipmentRows, buildSystemNetlist, parseConnectionCsv, parseKicadNetlistXml, projectForVariant, validateManufacturingRules } from "./production";
 
 describe("생산 엔지니어링", () => {
   it("번들 점유율과 과전류를 검증한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     project.parts.find((part) => part.id === "part-wire-red")!.attributes = { outerDiameterMm: "4", maxCurrentA: "5" };
     project.parts.find((part) => part.id === "part-wire-blue")!.attributes = { outerDiameterMm: "4" };
     project.parts.find((part) => part.id === "part-sleeve")!.attributes.innerDiameterMm = "5";
@@ -17,7 +17,7 @@ describe("생산 엔지니어링", () => {
   });
 
   it("BOM 단가와 시스템 계층 넷리스트를 계산한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     project.parts[0].attributes.unitCost = "2.5";
     project.workInstructions.push({ id: "wi", harnessId: "harness-main", sequence: 1, kind: "assembly", title: "조립", description: "", estimatedMinutes: 30 });
     project.manufacturingRules.laborRatePerHour = 10;
@@ -29,7 +29,7 @@ describe("생산 엔지니어링", () => {
   });
 
   it("Variant에서 비활성 전선과 부자재를 BOM 대상에서 제외한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const variant = { id: "v", name: "LOW", description: "", disabledConductorIds: ["wire-1"], disabledAccessoryIds: ["acc-label-1"] };
     const scoped = projectForVariant(project, variant);
     expect(scoped.harnesses[0].conductors.map((item) => item.id)).not.toContain("wire-1");
@@ -37,7 +37,7 @@ describe("생산 엔지니어링", () => {
   });
 
   it("연결 CSV를 기존 하우징 핀과 경로에 적용한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const rows = parseConnectionCsv("Harness,Wire,From,From Pin,To,To Pin,Wire Part,Color,Gauge\nHNS-001,W003,J1,3,J2,2,TXL-20-RD,RD,20 AWG");
     const result = applyConnectionImport(project, rows);
     expect(result).toEqual({ added: 1, skipped: [] });
@@ -60,7 +60,7 @@ describe("생산 엔지니어링", () => {
   });
 
   it("시스템 하네스 수량을 넷리스트 행에 반영한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     project.systems.push({ id: "sys", name: "장비", reference: "SYS1", harnessInstances: [{ id: "inst", harnessId: "harness-main", reference: "H1", quantity: 3 }] });
     expect(buildSystemNetlist(project, project.systems[0]).map((row) => row.quantity)).toEqual([3, 3]);
   });

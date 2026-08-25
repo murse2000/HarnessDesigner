@@ -31,8 +31,49 @@ export function getConductorPinIdAtNode(conductor: Conductor, nodeId: string) {
   return undefined;
 }
 
+export function closestPinConnectionCandidate<T>(candidates: Array<{ target: T; screenX: number; screenY: number; hitDistance: number }>, pointer: { x: number; y: number }) {
+  return [...candidates].sort((left, right) => {
+    const leftDistance = (left.screenX - pointer.x) ** 2 + (left.screenY - pointer.y) ** 2;
+    const rightDistance = (right.screenX - pointer.x) ** 2 + (right.screenY - pointer.y) ** 2;
+    return leftDistance - rightDistance || left.hitDistance - right.hitDistance;
+  })[0]?.target ?? null;
+}
+
 export function connectorWorldDirection(localDirection: THREE.Vector3, rotation: THREE.Quaternion) {
   return localDirection.clone().applyQuaternion(rotation).normalize();
+}
+
+export function buildInletCurve(start: THREE.Vector3, end: THREE.Vector3, startDirection?: THREE.Vector3, endDirection?: THREE.Vector3, startLeadMm = 0, endLeadMm = 0, middlePoints: THREE.Vector3[] = []) {
+  const distance = start.distanceTo(end);
+  const fallbackStart = end.clone().sub(start).normalize();
+  const fallbackEnd = start.clone().sub(end).normalize();
+  const startOut = startDirection?.lengthSq() ? startDirection.clone().normalize() : fallbackStart;
+  const endOut = endDirection?.lengthSq() ? endDirection.clone().normalize() : fallbackEnd;
+  const startLead = Math.min(Math.max(startLeadMm, 0), distance * 0.45);
+  const endLead = Math.min(Math.max(endLeadMm, 0), distance * 0.45);
+  const startLeadEnd = start.clone().addScaledVector(startOut, startLead);
+  const endLeadStart = end.clone().addScaledVector(endOut, endLead);
+  const curve = new THREE.CurvePath<THREE.Vector3>();
+  if (startLead > 0) curve.add(new THREE.LineCurve3(start, startLeadEnd));
+  const bendLength = Math.max(startLeadEnd.distanceTo(endLeadStart) * 0.2, 0.001);
+  if (middlePoints.length) {
+    curve.add(new THREE.CatmullRomCurve3([
+      startLeadEnd,
+      startLeadEnd.clone().addScaledVector(startOut, bendLength),
+      ...middlePoints,
+      endLeadStart.clone().addScaledVector(endOut, bendLength),
+      endLeadStart,
+    ], false, "centripetal"));
+  } else {
+    curve.add(new THREE.CubicBezierCurve3(
+      startLeadEnd,
+      startLeadEnd.clone().addScaledVector(startOut, bendLength),
+      endLeadStart.clone().addScaledVector(endOut, bendLength),
+      endLeadStart,
+    ));
+  }
+  if (endLead > 0) curve.add(new THREE.LineCurve3(endLeadStart, end));
+  return curve;
 }
 
 function cableOffsetBasis(curve: THREE.Curve<THREE.Vector3>) {
@@ -50,21 +91,16 @@ function fanoutCurve(start: THREE.Vector3, end: THREE.Vector3) {
   return new THREE.CatmullRomCurve3([start, start.clone().lerp(end, 0.5), end], false, "centripetal");
 }
 
-export function buildCableCoreCurves(centerCurve: THREE.Curve<THREE.Vector3>, startPin: THREE.Vector3, endPin: THREE.Vector3, breakoutRatio: number, offset: { x: number; y: number }) {
+export function buildCableCoreCurves(centerCurve: THREE.Curve<THREE.Vector3>, startPin: THREE.Vector3, endPin: THREE.Vector3, breakoutRatio: number, offset: { x: number; y: number }, startDirection?: THREE.Vector3, endDirection?: THREE.Vector3, startLeadMm = 0, endLeadMm = 0) {
   const ratio = Math.min(Math.max(breakoutRatio, 0), 0.5);
   const basis = cableOffsetBasis(centerCurve);
   const jacketStart = offsetCablePoint(centerCurve, ratio, offset, basis);
   const jacketEnd = offsetCablePoint(centerCurve, 1 - ratio, offset, basis);
+  const middle = offsetCablePoint(centerCurve, 0.5, offset, basis);
   return {
-    start: fanoutCurve(startPin, jacketStart),
-    end: fanoutCurve(jacketEnd, endPin),
-    full: new THREE.CatmullRomCurve3([
-      startPin,
-      jacketStart,
-      offsetCablePoint(centerCurve, 0.5, offset, basis),
-      jacketEnd,
-      endPin,
-    ], false, "centripetal"),
+    start: startDirection ? buildInletCurve(startPin, jacketStart, startDirection, undefined, startLeadMm) : fanoutCurve(startPin, jacketStart),
+    end: endDirection ? buildInletCurve(jacketEnd, endPin, undefined, endDirection, 0, endLeadMm) : fanoutCurve(jacketEnd, endPin),
+    full: buildInletCurve(startPin, endPin, startDirection, endDirection, startLeadMm, endLeadMm, [jacketStart, middle, jacketEnd]),
     jacketStart,
     jacketEnd,
   };

@@ -8,8 +8,8 @@ on:
     inputs:
       release_tag:
         description: "생성할 릴리즈 태그"
-        required: true
-        default: "v0.1.0"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -89,18 +89,26 @@ jobs:
       - name: Read application version
         run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV, 'APP_VERSION=' + require('./src-tauri/tauri.conf.json').version + '\n')"
       - name: Build desktop installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Collect macOS installer
         if: runner.os == 'macOS'
         run: |
           mkdir -p release-assets
           cp "$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name '*.dmg' -type f | head -1)" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.dmg"
+          updater="$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -name '*.app.tar.gz' -type f | head -1)"
+          cp "$updater" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.app.tar.gz"
+          cp "$updater.sig" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.app.tar.gz.sig"
       - name: Collect Linux installers
         if: runner.os == 'Linux'
         run: |
           mkdir -p release-assets
           cp "$(find src-tauri/target/${{ matrix.target }}/release/bundle/deb -name '*.deb' -type f | head -1)" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.deb"
-          cp "$(find src-tauri/target/${{ matrix.target }}/release/bundle/appimage -name '*.AppImage' -type f | head -1)" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.AppImage"
+          updater="$(find src-tauri/target/${{ matrix.target }}/release/bundle/appimage -name '*.AppImage' -type f | head -1)"
+          cp "$updater" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.AppImage"
+          cp "$updater.sig" "release-assets/Harness-Designer_${APP_VERSION}_${{ matrix.artifact }}.AppImage.sig"
       - name: Collect Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
@@ -109,6 +117,7 @@ jobs:
           $installer = Get-ChildItem "src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
           if (-not $installer) { throw "NSIS installer was not generated." }
           Copy-Item $installer.FullName "release-assets/Harness-Designer_${env:APP_VERSION}_${{ matrix.artifact }}_setup.exe"
+          Copy-Item "$($installer.FullName).sig" "release-assets/Harness-Designer_${env:APP_VERSION}_${{ matrix.artifact }}_setup.exe.sig"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -172,15 +181,32 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
+      - name: Resolve release tag
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+        run: |
+          APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${REQUESTED_TAG:-v${APP_VERSION}}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ "$RELEASE_TAG" != "v$APP_VERSION" ]; then
+            echo "릴리즈 태그 $RELEASE_TAG 와 앱 버전 v$APP_VERSION 이 일치하지 않습니다." >&2
+            exit 1
+          fi
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+      - name: Create updater manifest
+        run: node scripts/generate-updater-manifest.mjs release-assets "${{ github.repository }}" "$RELEASE_TAG" "$APP_VERSION"
       - name: Create SHA-256 checksums
         working-directory: release-assets
         run: sha256sum * > SHA256SUMS.txt
-      - name: Resolve release tag
-        run: echo "RELEASE_TAG=${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}" >> "$GITHUB_ENV"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -188,7 +214,7 @@ jobs:
           name: Harness Designer ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           draft: false
-          prerelease: true
+          prerelease: false
           body: |
             Windows, macOS, Linux 및 Android용 자동 빌드입니다.
 

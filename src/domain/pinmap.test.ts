@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sampleHarness, sampleParts } from "./sample";
+import { sampleHarness, sampleParts } from "../test/sampleProject";
 import { createConductorFromDraft, findUniqueSegmentRoute, hasConnectedPins, hasRenderableEndpoints, hasSegmentRoute, nextWireReference } from "./pinmap";
 
 describe("핀맵 연결 편집", () => {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { activeOutputFormats, applyNewProjectDefaults, defaultAppPreferences, loadAppPreferences, normalizeAppPreferences, saveAppPreferences } from "./preferences";
-import { createProject } from "./domain/sample";
+import { createSampleProject } from "./test/sampleProject";
 
 describe("app preferences", () => {
   beforeEach(() => {
@@ -30,7 +30,7 @@ describe("app preferences", () => {
   it("새 프로젝트에 출력 기본값을 적용한다", () => {
     const preferences = { ...defaultAppPreferences, defaultPaper: "A4" as const, defaultOutputLanguage: "en" as const, defaultImageDpi: 600 as const };
     saveAppPreferences(preferences);
-    const project = createProject();
+    const project = createSampleProject();
     applyNewProjectDefaults(project, loadAppPreferences());
     expect(project.settings).toMatchObject({ paper: "A4", outputLocales: ["en"], imageDpi: 600 });
   });

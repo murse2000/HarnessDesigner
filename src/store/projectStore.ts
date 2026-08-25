@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { PinConnectionPreset } from "../domain/pinmap";
 import { releasedHarnessEditViolation } from "../domain/release";
 import { canProjectRole, type ProjectPermission } from "../domain/permissions";
-import { createProject } from "../domain/sample";
+import { createProject } from "../domain/project";
 import type { ProjectDocument, SessionSnapshot, ViewKind } from "../domain/types";
 import type { Locale } from "../i18n";
 import { backendInvoke, isTauri } from "../platform";

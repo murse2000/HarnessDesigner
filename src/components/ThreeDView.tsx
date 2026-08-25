@@ -1,15 +1,16 @@
-import { Box, BoxSelect, Crosshair, Download, Eye, EyeOff, Focus, ListTree, Move3D, MousePointer2, Plus, Rotate3D, Save, ScanLine, Trash2, Waves } from "lucide-react";
+import { Box, BoxSelect, Crosshair, Download, Eye, EyeOff, Focus, ListTree, Move3D, MousePointer2, Plus, Rotate3D, RotateCcw, Save, ScanLine, Trash2, Waves } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DragControls } from "three/addons/controls/DragControls.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import type { HarnessAssembly, ModelAsset, ModelMesh, ProjectDocument } from "../domain/types";
+import type { HarnessAssembly, ModelAsset, ModelMesh, PartSnapshot, ProjectDocument } from "../domain/types";
+import { backendInvoke, isTauri } from "../platform";
 import { useProjectStore } from "../store/projectStore";
 import { getCableDisplayPolicy, getCableRenderSpec, getCableSpans, getCoreOffsets, getHeatShrinkRenderSpec, getHeatShrinkSpan, getIndividualWireOffsets, getWireRenderDiameterMm, type CoreOffset } from "../three/cableRendering";
-import { getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "../three/harnessLayout";
-import { defaultModelPlacement, getModelPlacement, type ModelCableAxis, type ModelPlacement } from "../three/modelPlacement";
-import { buildCableCoreCurves, connectorWorldDirection, getConductorPinIdAtNode, getPinConnectionPosition, pinConnectionKey, projectPinToConnectorSurface } from "../three/pinConnections";
+import { directWireConductors, directWireLengthMm, getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "../three/harnessLayout";
+import { defaultModelPlacement, getModelPinPort, getModelPlacement, modelInletDirection, modelPinPortDirection, resolveLibraryModelPlacement, rotateModelPinPorts, setModelPinPort, type ModelPlacement } from "../three/modelPlacement";
+import { buildCableCoreCurves, buildInletCurve, closestPinConnectionCandidate, connectorWorldDirection, getConductorPinIdAtNode, getPinConnectionPosition, pinConnectionKey, projectPinToConnectorSurface } from "../three/pinConnections";
 import { buildThreeSceneItems, type ThreeSceneItem } from "../three/sceneBrowser";
 import { PanelHeader } from "./common";
 import type { AppPreferences, Saved3DViewpoint } from "../preferences";
@@ -114,28 +115,30 @@ function modelGroup(asset: ModelAsset, selected: boolean, targetSize?: number, s
   return group;
 }
 
-function cableAxisVector(axis: ModelCableAxis): THREE.Vector3 {
-  if (axis === "+x") return new THREE.Vector3(1, 0, 0);
-  if (axis === "-x") return new THREE.Vector3(-1, 0, 0);
-  if (axis === "+y") return new THREE.Vector3(0, 1, 0);
-  if (axis === "-y") return new THREE.Vector3(0, -1, 0);
-  if (axis === "-z") return new THREE.Vector3(0, 0, -1);
-  return new THREE.Vector3(0, 0, 1);
+function inletDirectionVector(placement: ModelPlacement) {
+  const direction = modelInletDirection(placement);
+  return new THREE.Vector3(direction.x, direction.y, direction.z);
 }
 
-function placeConnectorVisual(visual: THREE.Object3D, placement: ModelPlacement, cableDirection: THREE.Vector3) {
-  const direction = cableDirection.clone().normalize();
-  const localAxis = cableAxisVector(placement.cableAxis);
+function placeConnectorVisual(visual: THREE.Object3D, placement: ModelPlacement) {
+  const direction = inletDirectionVector(placement);
   const bounds = new THREE.Box3().setFromObject(visual, true);
   const size = bounds.getSize(new THREE.Vector3());
-  const halfExtent = Math.abs(localAxis.x) * size.x / 2 + Math.abs(localAxis.y) * size.y / 2 + Math.abs(localAxis.z) * size.z / 2;
-  const anchor = localAxis.multiplyScalar(halfExtent).add(new THREE.Vector3(placement.offsetX, placement.offsetY, placement.offsetZ));
+  const halfExtent = Math.abs(direction.x) * size.x / 2 + Math.abs(direction.y) * size.y / 2 + Math.abs(direction.z) * size.z / 2;
+  const anchor = direction.clone().multiplyScalar(halfExtent).add(new THREE.Vector3(placement.offsetX, placement.offsetY, placement.offsetZ));
   visual.position.sub(anchor);
+  const rotationTarget = new THREE.Group();
+  rotationTarget.name = "model-placement-rotation";
+  rotationTarget.rotation.set(
+    THREE.MathUtils.degToRad(placement.rotationXDeg),
+    THREE.MathUtils.degToRad(placement.rotationYDeg),
+    THREE.MathUtils.degToRad(placement.rotationZDeg),
+  );
+  rotationTarget.add(visual);
   const root = new THREE.Group();
-  const alignment = new THREE.Quaternion().setFromUnitVectors(cableAxisVector(placement.cableAxis), direction);
   const roll = new THREE.Quaternion().setFromAxisAngle(direction, THREE.MathUtils.degToRad(placement.rollDeg));
-  root.quaternion.copy(roll.multiply(alignment));
-  root.add(visual);
+  root.quaternion.copy(roll);
+  root.add(rotationTarget);
   return root;
 }
 
@@ -247,33 +250,20 @@ function wireColor(color: string) {
   return 0x8aa1b4;
 }
 
-function cylinderBetween(start: THREE.Vector3, end: THREE.Vector3, radius: number, color: number) {
-  const direction = end.clone().sub(start);
-  if (direction.lengthSq() < 0.000001) return null;
-  const cylinder = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, direction.length(), 16),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.78 }),
-  );
-  cylinder.position.copy(start).add(end).multiplyScalar(0.5);
-  cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-  cylinder.castShadow = true;
-  return cylinder;
-}
-
-function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number, route: HarnessAssembly["segments"][number]["threeDRoute"]) {
+function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: number, route: HarnessAssembly["segments"][number]["threeDRoute"], startPort?: ConnectionPort, endPort?: ConnectionPort) {
   if (route?.controlPoints.length) {
-    const points = [start, ...[...route.controlPoints]
+    const points = [...route.controlPoints]
       .sort((left, right) => left.t - right.t)
       .map((point) => {
         const position = positionHarnessRoutePoint(start, end, point);
         return new THREE.Vector3(position.x, position.y, position.z);
-      }), end];
-    return new THREE.CatmullRomCurve3(points, false, "centripetal");
+      });
+    return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm, points);
   }
   const axis = end.clone().sub(start);
   const displayLength = axis.length();
   const coil = getCompactCoilLayout(cableLengthMm, displayLength);
-  if (!coil) return new THREE.LineCurve3(start, end);
+  if (!coil) return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm);
   const direction = axis.clone().normalize();
   const reference = Math.abs(direction.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
   const basisX = new THREE.Vector3().crossVectors(direction, reference).normalize();
@@ -287,7 +277,7 @@ function segmentCurve(start: THREE.Vector3, end: THREE.Vector3, cableLengthMm: n
       .addScaledVector(basisX, radius * (Math.cos(angle) - 1))
       .addScaledVector(basisY, radius * Math.sin(angle));
   });
-  return new THREE.CatmullRomCurve3(points, false, "centripetal");
+  return buildInletCurve(start, end, startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm, points.slice(1, -1));
 }
 
 function tubeAlongCurve(curve: THREE.Curve<THREE.Vector3>, startMm: number, endMm: number, totalLengthMm: number, radius: number, color: number, quality: AppPreferences["threeDQuality"], offset?: CoreOffset, offsetStart = 1, offsetEnd = 1) {
@@ -337,6 +327,13 @@ function setObjectOpacity(object: THREE.Object3D, opacity: number) {
 }
 
 type PinPositionMap = Map<string, THREE.Vector3>;
+type ConnectionPort = { direction: THREE.Vector3; straightLeadMm: number };
+type ConnectionPortMap = Map<string, ConnectionPort>;
+type PinConnectionPortMap = Map<string, ConnectionPort>;
+
+function connectionPortAtNode(nodeId: string, pinId: string | undefined, connectionPorts: ConnectionPortMap, pinConnectionPorts: PinConnectionPortMap) {
+  return pinId ? pinConnectionPorts.get(pinConnectionKey(nodeId, pinId)) ?? connectionPorts.get(nodeId) : connectionPorts.get(nodeId);
+}
 
 function conductorSegmentEndpoints(segment: HarnessAssembly["segments"][number], conductor: HarnessAssembly["conductors"][number], start: THREE.Vector3, end: THREE.Vector3, pinPositions: PinPositionMap) {
   const startPinId = getConductorPinIdAtNode(conductor, segment.fromNodeId);
@@ -346,15 +343,19 @@ function conductorSegmentEndpoints(segment: HarnessAssembly["segments"][number],
   return { start: conductorStart, end: conductorEnd };
 }
 
-function conductorSegmentCurve(segment: HarnessAssembly["segments"][number], conductor: HarnessAssembly["conductors"][number], start: THREE.Vector3, end: THREE.Vector3, pinPositions: PinPositionMap) {
+function conductorSegmentCurve(segment: HarnessAssembly["segments"][number], conductor: HarnessAssembly["conductors"][number], start: THREE.Vector3, end: THREE.Vector3, pinPositions: PinPositionMap, connectionPorts: ConnectionPortMap, pinConnectionPorts: PinConnectionPortMap) {
   const endpoints = conductorSegmentEndpoints(segment, conductor, start, end, pinPositions);
-  return segmentCurve(endpoints.start, endpoints.end, segment.lengthMm, segment.threeDRoute);
+  const startPinId = getConductorPinIdAtNode(conductor, segment.fromNodeId);
+  const endPinId = getConductorPinIdAtNode(conductor, segment.toNodeId);
+  return segmentCurve(endpoints.start, endpoints.end, segment.lengthMm, segment.threeDRoute, connectionPortAtNode(segment.fromNodeId, startPinId, connectionPorts, pinConnectionPorts), connectionPortAtNode(segment.toNodeId, endPinId, connectionPorts, pinConnectionPorts));
 }
 
-function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, segment: HarnessAssembly["segments"][number], start: THREE.Vector3, end: THREE.Vector3, pinPositions: PinPositionMap, selected: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, editRoute: boolean) {
+function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, segment: HarnessAssembly["segments"][number], start: THREE.Vector3, end: THREE.Vector3, pinPositions: PinPositionMap, connectionPorts: ConnectionPortMap, pinConnectionPorts: PinConnectionPortMap, selected: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, wireThickness: number, editRoute: boolean) {
   const cablePart = project.parts.find((part) => part.id === segment.cablePartId);
   const spec = getCableRenderSpec(cablePart);
-  const conductors = harness.conductors.filter((conductor) => conductor.routeSegmentIds.includes(segment.id));
+  const conductors = harness.conductors.filter((conductor) => spec
+    ? conductor.cableRunId === segment.id
+    : !conductor.cableRunId && conductor.routeSegmentIds.includes(segment.id));
   const group = new THREE.Group();
   group.userData.segmentId = segment.id;
   group.userData.sceneKind = "segment";
@@ -362,7 +363,7 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
   const coreLayer = visualLayer("cores", visibility.cores);
   const accessoryLayer = visualLayer("accessories", visibility.accessories);
   group.add(jacketLayer, coreLayer, accessoryLayer);
-  const curve = segmentCurve(start, end, segment.lengthMm, segment.threeDRoute);
+  const curve = segmentCurve(start, end, segment.lengthMm, segment.threeDRoute, connectionPorts.get(segment.fromNodeId), connectionPorts.get(segment.toNodeId));
   if (editRoute) {
     for (const [index, point] of (segment.threeDRoute?.controlPoints ?? []).entries()) {
       const position = positionHarnessRoutePoint(start, end, point);
@@ -378,19 +379,19 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
   }
   if (!spec) {
     if (!conductors.length) {
-      const cable = tubeAlongCurve(curve, 0, segment.lengthMm, segment.lengthMm, 1.15, selected ? 0xf0a53b : 0x263f54, quality);
+      const cable = tubeAlongCurve(curve, 0, segment.lengthMm, segment.lengthMm, 1.15 * wireThickness, selected ? 0xf0a53b : 0x263f54, quality);
       if (cable) jacketLayer.add(cable);
     } else {
       const wires = conductors.map((conductor) => ({
         conductor,
         diameterMm: getWireRenderDiameterMm(project.parts.find((part) => part.id === conductor.wirePartId), conductor.gauge),
-        curve: conductorSegmentCurve(segment, conductor, start, end, pinPositions),
+        curve: conductorSegmentCurve(segment, conductor, start, end, pinPositions, connectionPorts, pinConnectionPorts),
       }));
       const offsets = getIndividualWireOffsets(wires.map((wire) => wire.diameterMm));
       wires.forEach((wire, index) => {
         const hasPinEndpoint = Boolean(getConductorPinIdAtNode(wire.conductor, segment.fromNodeId) || getConductorPinIdAtNode(wire.conductor, segment.toNodeId));
         const offset = hasPinEndpoint ? undefined : { x: offsets[index].x * coreSeparation, y: offsets[index].y * coreSeparation };
-        const tube = tubeAlongCurve(wire.curve, 0, segment.lengthMm, segment.lengthMm, wire.diameterMm / 2, selected ? 0xf0a53b : wireColor(wire.conductor.color), quality, offset);
+        const tube = tubeAlongCurve(wire.curve, 0, segment.lengthMm, segment.lengthMm, wire.diameterMm * wireThickness / 2, selected ? 0xf0a53b : wireColor(wire.conductor.color), quality, offset);
         if (tube) coreLayer.add(tube);
       });
     }
@@ -401,7 +402,7 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
   const lengthMm = segment.lengthMm;
   if (lengthMm <= 0) return;
   if (!conductors.length) {
-    const jacket = tubeAlongCurve(curve, 0, lengthMm, lengthMm, spec.outerDiameterMm / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
+    const jacket = tubeAlongCurve(curve, 0, lengthMm, lengthMm, spec.outerDiameterMm * wireThickness / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
     if (jacket) jacketLayer.add(jacket);
     runtime.content.add(group);
     return;
@@ -409,36 +410,40 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
 
   const { breakoutMm } = getCableSpans(lengthMm, spec.breakoutLengthMm);
   const displayPolicy = getCableDisplayPolicy(visibility.xray, visibility.jackets);
-  const jacket = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
+  const jacket = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm * wireThickness / 2, selected ? 0xf0a53b : wireColor(spec.jacketColor), quality);
   if (jacket) {
     setObjectOpacity(jacket, displayPolicy.jacketOpacity);
     jacketLayer.add(jacket);
   }
 
-  const offsets = getCoreOffsets(conductors.length, spec.outerDiameterMm, spec.coreDiameterMm).map((offset) => ({ x: offset.x * coreSeparation, y: offset.y * coreSeparation }));
+  const offsets = getCoreOffsets(conductors.length, spec.outerDiameterMm * wireThickness, spec.coreDiameterMm * wireThickness).map((offset) => ({ x: offset.x * coreSeparation, y: offset.y * coreSeparation }));
   conductors.forEach((conductor, index) => {
     const endpoints = conductorSegmentEndpoints(segment, conductor, start, end, pinPositions);
-    const coreCurves = buildCableCoreCurves(curve, endpoints.start, endpoints.end, breakoutMm / lengthMm, offsets[index]);
+    const startPinId = getConductorPinIdAtNode(conductor, segment.fromNodeId);
+    const endPinId = getConductorPinIdAtNode(conductor, segment.toNodeId);
+    const startPort = connectionPortAtNode(segment.fromNodeId, startPinId, connectionPorts, pinConnectionPorts);
+    const endPort = connectionPortAtNode(segment.toNodeId, endPinId, connectionPorts, pinConnectionPorts);
+    const coreCurves = buildCableCoreCurves(curve, endpoints.start, endpoints.end, breakoutMm / lengthMm, offsets[index], startPort?.direction, endPort?.direction, startPort?.straightLeadMm, endPort?.straightLeadMm);
     if (displayPolicy.showFullLengthCores) {
-      const exposedCore = tubeAlongCurve(coreCurves.full, 0, lengthMm, lengthMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality);
+      const exposedCore = tubeAlongCurve(coreCurves.full, 0, lengthMm, lengthMm, spec.coreDiameterMm * wireThickness / 2, wireColor(conductor.color), quality);
       if (exposedCore) coreLayer.add(exposedCore);
       return;
     }
-    const coreStart = tubeAlongCurve(coreCurves.start, 0, breakoutMm, breakoutMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality);
-    const coreEnd = tubeAlongCurve(coreCurves.end, 0, breakoutMm, breakoutMm, spec.coreDiameterMm / 2, wireColor(conductor.color), quality);
+    const coreStart = tubeAlongCurve(coreCurves.start, 0, breakoutMm, breakoutMm, spec.coreDiameterMm * wireThickness / 2, wireColor(conductor.color), quality);
+    const coreEnd = tubeAlongCurve(coreCurves.end, 0, breakoutMm, breakoutMm, spec.coreDiameterMm * wireThickness / 2, wireColor(conductor.color), quality);
     if (coreStart) coreLayer.add(coreStart);
     if (coreEnd) coreLayer.add(coreEnd);
   });
 
   if (spec.construction === "shieldedMultiCore") {
-    const shield = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm * 0.43, 0xaeb8c2, quality);
+    const shield = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, spec.outerDiameterMm * wireThickness * 0.43, 0xaeb8c2, quality);
     if (shield) {
       setObjectOpacity(shield, displayPolicy.shieldOpacity);
       accessoryLayer.add(shield);
     }
   }
 
-  const coveringRadius = spec.outerDiameterMm / 2 + 0.45;
+  const coveringRadius = spec.outerDiameterMm * wireThickness / 2 + 0.45;
   if (segment.sleevePartId) {
     const sleeve = tubeAlongCurve(curve, breakoutMm, lengthMm - breakoutMm, lengthMm, coveringRadius, 0x596a75, quality);
     if (sleeve) accessoryLayer.add(sleeve);
@@ -457,10 +462,30 @@ function addSegmentVisual(runtime: SceneRuntime, project: ProjectDocument, harne
     const heatShrinkSpec = getHeatShrinkRenderSpec(heatShrinkPart);
     if (!heatShrinkSpec) continue;
     const span = getHeatShrinkSpan(lengthMm, heatShrink.centerMm, heatShrinkSpec.lengthMm);
-    const tube = tubeAlongCurve(curve, span.startMm, span.endMm, lengthMm, heatShrinkSpec.finishedDiameterMm / 2, wireColor(heatShrinkSpec.color), quality);
+    const tube = tubeAlongCurve(curve, span.startMm, span.endMm, lengthMm, heatShrinkSpec.finishedDiameterMm * wireThickness / 2, wireColor(heatShrinkSpec.color), quality);
     if (tube) accessoryLayer.add(tube);
   }
   runtime.content.add(group);
+}
+
+function addDirectWireVisuals(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, nodePositions: Map<string, THREE.Vector3>, pinPositions: PinPositionMap, connectionPorts: ConnectionPortMap, pinConnectionPorts: PinConnectionPortMap, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, wireThickness: number) {
+  for (const conductor of directWireConductors(harness)) {
+    const nodeStart = nodePositions.get(conductor.from.nodeId);
+    const nodeEnd = nodePositions.get(conductor.to.nodeId);
+    if (!nodeStart || !nodeEnd) continue;
+    const start = conductor.from.pinId ? pinPositions.get(pinConnectionKey(conductor.from.nodeId, conductor.from.pinId)) ?? nodeStart : nodeStart;
+    const end = conductor.to.pinId ? pinPositions.get(pinConnectionKey(conductor.to.nodeId, conductor.to.pinId)) ?? nodeEnd : nodeEnd;
+    const lengthMm = directWireLengthMm(harness, conductor);
+    const curve = segmentCurve(start, end, lengthMm, undefined, connectionPortAtNode(conductor.from.nodeId, conductor.from.pinId, connectionPorts, pinConnectionPorts), connectionPortAtNode(conductor.to.nodeId, conductor.to.pinId, connectionPorts, pinConnectionPorts));
+    const diameterMm = getWireRenderDiameterMm(project.parts.find((part) => part.id === conductor.wirePartId), conductor.gauge);
+    const tube = tubeAlongCurve(curve, 0, lengthMm, lengthMm, diameterMm * wireThickness / 2, wireColor(conductor.color), quality);
+    if (!tube) continue;
+    const group = visualLayer("direct-wire", visibility.cores);
+    group.userData.sceneKind = "directConductor";
+    group.userData.conductorId = conductor.id;
+    group.add(tube);
+    runtime.content.add(group);
+  }
 }
 
 function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (selection: ThreeSelection) => void, onRoutePointCommit?: (segmentId: string, index: number, point: { t: number; offsetX: number; offsetY: number }) => void, nodeLayoutEditing = false, partRotationEditing = false, onNodePositionCommit?: (nodeId: string, position: { x: number; y: number; z: number }) => void, onAccessoryOffsetCommit?: (accessoryId: string, offset: { x: number; y: number; z: number }) => void, onNodeRotationCommit?: (nodeId: string, rotation: PartRotation) => void, onAccessoryRotationCommit?: (accessoryId: string, rotation: PartRotation) => void, onPinConnectionCommit?: (nodeId: string, pinId: string, offset: { x: number; y: number; z: number }) => void) {
@@ -593,12 +618,21 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (sel
     };
     const pinHandleFromEvent = (event: PointerEvent) => {
       setPointerRay(event);
+      const rect = renderer.domElement.getBoundingClientRect();
+      const candidates = new Map<string, { target: THREE.Object3D; screenX: number; screenY: number; hitDistance: number }>();
       for (const hit of raycaster.intersectObjects(content.children, true)) {
         let target: THREE.Object3D | null = hit.object;
         while (target && !target.userData.pinConnection && target !== content) target = target.parent;
-        if (target?.userData.pinConnection) return target;
+        if (!target?.userData.pinConnection || candidates.has(target.uuid)) continue;
+        const screen = target.getWorldPosition(new THREE.Vector3()).project(camera);
+        candidates.set(target.uuid, {
+          target,
+          screenX: rect.left + (screen.x + 1) * rect.width / 2,
+          screenY: rect.top + (1 - screen.y) * rect.height / 2,
+          hitDistance: hit.distance,
+        });
       }
-      return null;
+      return closestPinConnectionCandidate([...candidates.values()], { x: event.clientX, y: event.clientY });
     };
     const pointerDown = (event: PointerEvent) => {
       pointer = { x: event.clientX, y: event.clientY };
@@ -610,7 +644,6 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (sel
       pinSurfaceDrag = { handle, node, pointerId: event.pointerId };
       controls.enabled = false;
       transform.detach();
-      selectRef.current?.({ kind: "pinConnection", id: handle.userData.nodeId as string, pinId: handle.userData.pinId as string });
       renderer.domElement.setPointerCapture(event.pointerId);
       event.preventDefault();
       event.stopPropagation();
@@ -632,6 +665,7 @@ function useThreeScene(quality: AppPreferences["threeDQuality"], onSelect?: (sel
       if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
       const localOffset = handle.position.clone().sub(node.position).applyQuaternion(node.quaternion.clone().invert());
       pinConnectionCommitRef.current?.(handle.userData.nodeId as string, handle.userData.pinId as string, { x: localOffset.x, y: localOffset.y, z: localOffset.z });
+      selectRef.current?.({ kind: "pinConnection", id: handle.userData.nodeId as string, pinId: handle.userData.pinId as string });
       return true;
     };
     const pointerUp = (event: PointerEvent) => {
@@ -768,7 +802,7 @@ function buildPinPositions(harness: HarnessAssembly, nodePositions: Map<string, 
   return pinPositions;
 }
 
-function scenePinPositions(runtime: SceneRuntime, harness: HarnessAssembly) {
+function scenePinPositions(runtime: SceneRuntime) {
   const pinPositions: PinPositionMap = new Map();
   for (const nodeObject of runtime.content.children.filter((child) => child.userData.sceneKind === "node")) {
     const offsets = nodeObject.userData.pinConnectionOffsets as Record<string, [number, number, number]> | undefined;
@@ -782,7 +816,32 @@ function scenePinPositions(runtime: SceneRuntime, harness: HarnessAssembly) {
   return pinPositions;
 }
 
-function refreshNodeConnections(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, nodeId: string, selectedEntityId: string | null, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, activePinId?: string) {
+function sceneConnectionPorts(runtime: SceneRuntime, harness: HarnessAssembly) {
+  const connectionPorts: ConnectionPortMap = new Map();
+  const pinConnectionPorts: PinConnectionPortMap = new Map();
+  for (const object of runtime.content.children) {
+    if (object.userData.sceneKind !== "node" || !object.userData.inletDirection) continue;
+    const nodeId = object.userData.nodeId as string;
+    const localDirection = new THREE.Vector3().fromArray(object.userData.inletDirection as [number, number, number]);
+    connectionPorts.set(nodeId, {
+      direction: connectorWorldDirection(localDirection, object.quaternion),
+      straightLeadMm: object.userData.straightLeadMm as number,
+    });
+    const node = harness.nodes.find((item) => item.id === nodeId);
+    const pinPorts = object.userData.pinInletPorts as ModelPlacement["pinPorts"] | undefined;
+    for (const pin of node?.pins ?? []) {
+      const pinPort = pinPorts?.find((port) => port.pinNumber === pin.number);
+      if (!pinPort) continue;
+      pinConnectionPorts.set(pinConnectionKey(nodeId, pin.id), {
+        direction: connectorWorldDirection(new THREE.Vector3(pinPort.directionX, pinPort.directionY, pinPort.directionZ), object.quaternion),
+        straightLeadMm: pinPort.straightLeadMm,
+      });
+    }
+  }
+  return { connectionPorts, pinConnectionPorts };
+}
+
+function refreshNodeConnections(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, nodeId: string, selectedEntityId: string | null, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, wireThickness: number, activePinId?: string) {
   const nodeObject = (id: string) => runtime.content.children.find((child) => child.userData.sceneKind === "node" && child.userData.nodeId === id);
   const movedNode = nodeObject(nodeId);
   if (!movedNode) return;
@@ -792,7 +851,8 @@ function refreshNodeConnections(runtime: SceneRuntime, project: ProjectDocument,
     handle.position.copy(movedNode.position).add(new THREE.Vector3(offsetX, offsetY, offsetZ).applyQuaternion(movedNode.quaternion));
     handle.userData.nodeOrigin = movedNode.position.toArray();
   }
-  const pinPositions = scenePinPositions(runtime, harness);
+  const pinPositions = scenePinPositions(runtime);
+  const { connectionPorts, pinConnectionPorts } = sceneConnectionPorts(runtime, harness);
   const connectedSegments = harness.segments.filter((segment) => segment.fromNodeId === nodeId || segment.toNodeId === nodeId);
   for (const segment of connectedSegments) {
     const current = runtime.content.children.find((child) => child.userData.sceneKind === "segment" && child.userData.segmentId === segment.id);
@@ -802,8 +862,16 @@ function refreshNodeConnections(runtime: SceneRuntime, project: ProjectDocument,
     }
     const start = nodeObject(segment.fromNodeId)?.position;
     const end = nodeObject(segment.toNodeId)?.position;
-    if (start && end) addSegmentVisual(runtime, project, harness, segment, start, end, pinPositions, selectedEntityId === segment.id, quality, visibility, coreSeparation, false);
+    if (start && end) addSegmentVisual(runtime, project, harness, segment, start, end, pinPositions, connectionPorts, pinConnectionPorts, selectedEntityId === segment.id, quality, visibility, coreSeparation, wireThickness, false);
   }
+  for (const directWire of runtime.content.children.filter((child) => child.userData.sceneKind === "directConductor")) {
+    runtime.content.remove(directWire);
+    disposeObject(directWire);
+  }
+  addDirectWireVisuals(runtime, project, harness, new Map(harness.nodes.flatMap((node) => {
+    const object = nodeObject(node.id);
+    return object ? [[node.id, object.position] as const] : [];
+  })), pinPositions, connectionPorts, pinConnectionPorts, quality, visibility, wireThickness);
   for (const accessory of runtime.content.children.filter((child) => child.userData.sceneKind === "accessory")) {
     const applyAnchor = (anchor: THREE.Vector3) => {
       const [offsetX, offsetY, offsetZ] = accessory.userData.accessoryOffset as [number, number, number];
@@ -819,7 +887,7 @@ function refreshNodeConnections(runtime: SceneRuntime, project: ProjectDocument,
   }
 }
 
-function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, selectedEntityId: string | null, compactLayout: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, editRoute: boolean, editPinConnections: boolean) {
+function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: HarnessAssembly, selectedEntityId: string | null, compactLayout: boolean, quality: AppPreferences["threeDQuality"], visibility: ThreeVisibility, coreSeparation: number, wireThickness: number, editRoute: boolean, editPinConnections: boolean) {
   runtime.transform.detach();
   runtime.drag.objects.length = 0;
   runtime.drag.enabled = false;
@@ -840,16 +908,11 @@ function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: 
     const placement = asset ? getModelPlacement(part) : defaultModelPlacement;
     const visual = asset ? modelGroup(asset, selectedEntityId === node.id, undefined, placement.scale) : placeholderNode(node.kind, selectedEntityId === node.id, quality);
     if (node.kind === "connector") {
-      const adjacentPositions = harness.segments.flatMap((segment) => {
-        const otherId = segment.fromNodeId === node.id ? segment.toNodeId : segment.toNodeId === node.id ? segment.fromNodeId : null;
-        const other = otherId ? positions.get(otherId) : null;
-        return other ? [other] : [];
-      });
-      const direction = adjacentPositions.reduce((sum, position) => sum.add(position.clone().sub(group.position).normalize()), new THREE.Vector3());
-      if (direction.lengthSq() < 0.001) direction.set(0, 0, 1);
-      else direction.normalize();
-      group.userData.connectionDirection = direction.toArray();
-      group.add(placeConnectorVisual(visual, placement, direction));
+      const inletDirection = inletDirectionVector(placement);
+      group.userData.inletDirection = inletDirection.toArray();
+      group.userData.straightLeadMm = placement.straightLeadMm;
+      group.userData.pinInletPorts = placement.pinPorts;
+      group.add(placeConnectorVisual(visual, placement));
     } else {
       group.add(visual);
     }
@@ -863,11 +926,18 @@ function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: 
   for (const node of harness.nodes.filter((item) => item.kind === "connector")) {
     const nodeObject = runtime.content.children.find((child) => child.userData.sceneKind === "node" && child.userData.nodeId === node.id);
     if (!nodeObject) continue;
-    const direction = connectorWorldDirection(new THREE.Vector3().fromArray(nodeObject.userData.connectionDirection as [number, number, number]), nodeObject.quaternion);
+    const direction = connectorWorldDirection(new THREE.Vector3().fromArray(nodeObject.userData.inletDirection as [number, number, number]), nodeObject.quaternion);
+    const part = project.parts.find((item) => item.id === node.partId);
+    const placement = getModelPlacement(part);
     for (const pin of node.pins) {
       const key = pinConnectionKey(node.id, pin.id);
       const desired = pinPositions.get(key);
       if (!desired) continue;
+      const savedPinPort = placement.pinPorts.find((port) => port.pinNumber === pin.number);
+      if (savedPinPort && !pin.threeDConnectionOffset) {
+        pinPositions.set(key, nodeObject.position.clone().add(new THREE.Vector3(savedPinPort.offsetX, savedPinPort.offsetY, savedPinPort.offsetZ).applyQuaternion(nodeObject.quaternion)));
+        continue;
+      }
       const rotated = desired.clone().sub(nodeObject.position).applyQuaternion(nodeObject.quaternion).add(nodeObject.position);
       pinPositions.set(key, pin.threeDConnectionOffset ? rotated : projectPinToConnectorSurface(nodeObject, rotated, direction));
     }
@@ -877,6 +947,7 @@ function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: 
       return [pin.id, [offset.x, offset.y, offset.z]];
     }));
   }
+  const { connectionPorts, pinConnectionPorts } = sceneConnectionPorts(runtime, harness);
   if (editPinConnections) {
     for (const node of harness.nodes.filter((item) => item.kind === "connector")) {
       const nodePosition = positions.get(node.id);
@@ -915,17 +986,20 @@ function buildHarness(runtime: SceneRuntime, project: ProjectDocument, harness: 
     const start = positions.get(segment.fromNodeId);
     const end = positions.get(segment.toNodeId);
     if (!start || !end) continue;
-    addSegmentVisual(runtime, project, harness, segment, start, end, pinPositions, selectedEntityId === segment.id, quality, visibility, coreSeparation, editRoute && selectedEntityId === segment.id);
+    addSegmentVisual(runtime, project, harness, segment, start, end, pinPositions, connectionPorts, pinConnectionPorts, selectedEntityId === segment.id, quality, visibility, coreSeparation, wireThickness, editRoute && selectedEntityId === segment.id);
   }
+  addDirectWireVisuals(runtime, project, harness, positions, pinPositions, connectionPorts, pinConnectionPorts, quality, visibility, wireThickness);
   addAccessoryVisuals(runtime, project, harness, positions, visibility);
-  runtime.refreshNodeConnections = (nodeId, activePinId) => refreshNodeConnections(runtime, project, harness, nodeId, selectedEntityId, quality, visibility, coreSeparation, activePinId);
+  runtime.refreshNodeConnections = (nodeId, activePinId) => refreshNodeConnections(runtime, project, harness, nodeId, selectedEntityId, quality, visibility, coreSeparation, wireThickness, activePinId);
 }
 
 export function Harness3DView() {
   const { snapshot, activeHarnessId, selectedEntityId, selectedEntityType, selectEntity, updateProject, preferences, setPreferences } = useProjectStore();
+  const [libraryParts, setLibraryParts] = useState<PartSnapshot[]>([]);
   const [compactLayout, setCompactLayout] = useState(true);
   const [visibility, setVisibility] = useState<ThreeVisibility>({ housings: true, jackets: true, cores: true, accessories: true, labels: true, grid: true, xray: false });
   const [coreSeparation, setCoreSeparation] = useState(1);
+  const [wireThickness, setWireThickness] = useState(0.6);
   const [sceneBrowserOpen, setSceneBrowserOpen] = useState(true);
   const [editRoute, setEditRoute] = useState(false);
   const [editNodeLayout, setEditNodeLayout] = useState(false);
@@ -934,6 +1008,14 @@ export function Harness3DView() {
   const [selectedRoutePoint, setSelectedRoutePoint] = useState<number | null>(null);
   const [activeViewpointId, setActiveViewpointId] = useState("");
   const layoutKeyRef = useRef("");
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    void backendInvoke<PartSnapshot[]>("list_library_parts")
+      .then((parts) => { if (!cancelled) setLibraryParts(parts); })
+      .catch(() => { if (!cancelled) setLibraryParts([]); });
+    return () => { cancelled = true; };
+  }, []);
   const { hostRef, runtimeRef } = useThreeScene(preferences.threeDQuality, (selection) => {
     if (selection.kind === "node" || selection.kind === "pinConnection") selectEntity(selection.id, "node");
     else if (selection.kind === "accessory") selectEntity(selection.id, "accessory");
@@ -985,10 +1067,14 @@ export function Harness3DView() {
     });
   });
   const harness = snapshot?.project.harnesses.find((item) => item.id === activeHarnessId);
-  const sceneItems = useMemo(() => snapshot && harness ? buildThreeSceneItems(snapshot.project, harness) : [], [harness, snapshot]);
+  const renderProject = useMemo(() => snapshot ? {
+    ...snapshot.project,
+    parts: snapshot.project.parts.map((part) => resolveLibraryModelPlacement(part, libraryParts)),
+  } : null, [libraryParts, snapshot]);
+  const sceneItems = useMemo(() => renderProject && harness ? buildThreeSceneItems(renderProject, harness) : [], [harness, renderProject]);
   useEffect(() => {
-    if (!runtimeRef.current || !snapshot || !harness) return;
-    buildHarness(runtimeRef.current, snapshot.project, harness, selectedEntityId, compactLayout, preferences.threeDQuality, visibility, coreSeparation, editRoute, editPinConnections);
+    if (!runtimeRef.current || !renderProject || !harness) return;
+    buildHarness(runtimeRef.current, renderProject, harness, selectedEntityId, compactLayout, preferences.threeDQuality, visibility, coreSeparation, wireThickness, editRoute, editPinConnections);
     if (editPartRotation && (selectedEntityType === "node" || selectedEntityType === "accessory")) {
       const selectedPart = runtimeRef.current.content.children.find((child) => selectedEntityType === "node"
         ? child.userData.sceneKind === "node" && child.userData.nodeId === selectedEntityId && child.userData.movable
@@ -1015,9 +1101,24 @@ export function Harness3DView() {
       fitCamera(runtimeRef.current);
       layoutKeyRef.current = layoutKey;
     }
-  }, [snapshot?.revision, harness?.id, selectedEntityId, selectedEntityType, compactLayout, preferences.threeDQuality, visibility, coreSeparation, editRoute, editNodeLayout, editPartRotation, editPinConnections]);
+  }, [snapshot?.revision, renderProject, harness?.id, selectedEntityId, selectedEntityType, compactLayout, preferences.threeDQuality, visibility, coreSeparation, wireThickness, editRoute, editNodeLayout, editPartRotation, editPinConnections]);
   if (!snapshot || !harness) return <div className="canvas-empty"><Box size={36} /><span>3D로 표시할 하네스를 선택하세요.</span></div>;
   const selectedSegment = selectedEntityType === "segment" ? harness.segments.find((item) => item.id === selectedEntityId) : undefined;
+  const selectedNode = selectedEntityType === "node" ? harness.nodes.find((item) => item.id === selectedEntityId) : undefined;
+  const selectedAccessory = selectedEntityType === "accessory" ? harness.accessories.find((item) => item.id === selectedEntityId) : undefined;
+  const selectedRotation = selectedNode?.threeDRotation ?? selectedAccessory?.threeDRotation ?? { x: 0, y: 0, z: 0 };
+  const setSelectedRotation = (rotation: PartRotation) => {
+    void updateProject((project) => {
+      const activeHarness = project.harnesses.find((item) => item.id === harness.id);
+      const node = activeHarness?.nodes.find((item) => item.id === selectedNode?.id);
+      const accessory = activeHarness?.accessories.find((item) => item.id === selectedAccessory?.id);
+      if (node) node.threeDRotation = rotation;
+      if (accessory) accessory.threeDRotation = rotation;
+    });
+  };
+  const updateSelectedRotation = (axis: keyof PartRotation, value: number) => {
+    if (Number.isFinite(value)) setSelectedRotation({ ...selectedRotation, [axis]: value });
+  };
   const selectSceneItem = (item: ThreeSceneItem) => {
     selectEntity(item.id, item.kind);
     if (runtimeRef.current) focusSceneObject(runtimeRef.current, item.kind, item.id);
@@ -1121,15 +1222,20 @@ export function Harness3DView() {
       {(["housings", "jackets", "cores", "accessories", "labels", "grid"] as const).map((key) => <button key={key} className={visibility[key] ? "active" : ""} onClick={() => toggleVisibility(key)}>{visibility[key] ? <Eye size={11} /> : <EyeOff size={11} />}{key === "housings" ? "하우징" : key === "jackets" ? "외피" : key === "cores" ? "코어" : key === "accessories" ? "부자재" : key === "labels" ? "표기" : "그리드"}</button>)}
       <button className={visibility.xray ? "active" : ""} onClick={() => toggleVisibility("xray")}><ScanLine size={11} />X-RAY</button>
       <label>코어 분리 <input aria-label="코어 분리" type="range" min="1" max="4" step="0.5" value={coreSeparation} onChange={(event) => setCoreSeparation(Number(event.target.value))} /><b>{coreSeparation.toFixed(1)}×</b></label>
+      <label>선 굵기 <input aria-label="선 굵기" type="range" min="0.3" max="1" step="0.1" value={wireThickness} onChange={(event) => setWireThickness(Number(event.target.value))} /><b>{wireThickness.toFixed(1)}×</b></label>
       <span className="three-legend"><i className="housing" />하우징<i className="jacket" />외피<i className="core" />코어<i className="accessory" />부자재</span>
     </div>
     <div className="three-toolbar three-toolbar--shape">
       <span><Move3D size={12} />형상 편집</span>
-      <strong>{selectedSegment ? selectedSegment.label : "케이블을 선택하세요"}</strong>
+      <strong>{editPartRotation ? selectedNode?.reference ?? (selectedAccessory ? "부자재" : "구성 요소를 선택하세요") : selectedSegment ? selectedSegment.label : "케이블을 선택하세요"}</strong>
       <button className={editRoute ? "active" : ""} disabled={!selectedSegment} onClick={toggleRouteEditing}><Rotate3D size={12} />제어점</button>
       <button disabled={!selectedSegment} onClick={addRoutePoint}><Plus size={12} />추가</button>
       <button disabled={selectedRoutePoint === null} onClick={deleteRoutePoint}><Trash2 size={12} />삭제</button>
       <button disabled={!selectedSegment?.threeDRoute} onClick={resetRoute}>자동 형상</button>
+      {editPartRotation && (selectedNode || selectedAccessory) && <div className="three-rotation-fields">
+        {(["x", "y", "z"] as const).map((axis) => <label key={axis}>{axis.toUpperCase()}<input aria-label={`${axis.toUpperCase()}축 회전`} type="number" step="5" value={selectedRotation[axis]} onChange={(event) => updateSelectedRotation(axis, Number(event.target.value))} />°</label>)}
+        <button onClick={() => setSelectedRotation({ x: 0, y: 0, z: 0 })}><RotateCcw size={11} />0°</button>
+      </div>}
       {editNodeLayout && <em>구성 요소를 선택한 뒤 본체를 왼쪽 버튼으로 드래그하면 연결된 선이 함께 이동합니다.</em>}
       {editPartRotation && <em>구성 요소를 선택한 뒤 빨강(X)·초록(Y)·파랑(Z) 회전 링을 드래그하세요.</em>}
       {editPinConnections && <em>청록색 핀 접속점을 커넥터 STEP/도형 표면 위로 드래그하면 해당 핀의 선만 따라옵니다.</em>}
@@ -1149,27 +1255,199 @@ export function Harness3DView() {
   </div>;
 }
 
-export function Part3DPreview({ asset, placement, showCable = false }: { asset: ModelAsset | null; placement?: ModelPlacement; showCable?: boolean }) {
+export function Part3DPreview({ asset, placement, showCable = false, onPlacementChange, pinNumbers = [], selectedPinNumber, placingPinPort = false, rotatingConnector = false, onPinPortPlaced }: { asset: ModelAsset | null; placement?: ModelPlacement; showCable?: boolean; onPlacementChange?: (placement: ModelPlacement) => void; pinNumbers?: string[]; selectedPinNumber?: string; placingPinPort?: boolean; rotatingConnector?: boolean; onPinPortPlaced?: () => void }) {
   const quality = useProjectStore((state) => state.preferences.threeDQuality);
   const { hostRef, runtimeRef } = useThreeScene(quality);
+  const fittedAssetIdRef = useRef<string | null>(null);
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     disposeObject(runtime.content);
     runtime.content.clear();
+    if (!asset) fittedAssetIdRef.current = null;
     if (asset) {
       if (showCable) {
         const resolvedPlacement = placement ?? defaultModelPlacement;
-        runtime.content.add(placeConnectorVisual(modelGroup(asset, false, undefined, resolvedPlacement.scale), resolvedPlacement, new THREE.Vector3(0, 0, 1)));
-        const cable = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 30, 16), new THREE.MeshStandardMaterial({ color: 0x263f54, roughness: 0.78 }));
-        cable.position.set(0, 0, 15);
-        cable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
-        runtime.content.add(cable, new THREE.AxesHelper(12));
+        const activePinNumber = selectedPinNumber ?? pinNumbers[0];
+        const activePinPort = activePinNumber ? getModelPinPort(resolvedPlacement, activePinNumber) : null;
+        const fallbackDirection = modelInletDirection(resolvedPlacement);
+        const activeDirection = activePinPort ? modelPinPortDirection(activePinPort, fallbackDirection) : fallbackDirection;
+        const direction = new THREE.Vector3(activeDirection.x, activeDirection.y, activeDirection.z);
+        const portPosition = activePinPort
+          ? new THREE.Vector3(activePinPort.offsetX, activePinPort.offsetY, activePinPort.offsetZ)
+          : new THREE.Vector3();
+        const connector = placeConnectorVisual(modelGroup(asset, false, undefined, resolvedPlacement.scale), resolvedPlacement);
+        const rotationTarget = connector.getObjectByName("model-placement-rotation");
+        const port = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 10), new THREE.MeshBasicMaterial({ color: 0x18a7d4, depthTest: false }));
+        port.position.copy(portPosition);
+        port.renderOrder = 1000;
+        const portHitTarget = new THREE.Mesh(new THREE.SphereGeometry(3.2, 12, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+        portHitTarget.position.copy(portPosition);
+        const arrow = new THREE.ArrowHelper(direction, portPosition, 18, 0x18a7d4, 4, 2.5);
+        const directionHandle = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 10), new THREE.MeshBasicMaterial({ color: 0x18a7d4, transparent: true, opacity: 0.7, depthTest: false }));
+        directionHandle.position.copy(portPosition).addScaledVector(direction, 18);
+        directionHandle.userData.inletDirectionHandle = true;
+        directionHandle.renderOrder = 1000;
+        const directionHitTarget = new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+        directionHitTarget.position.copy(directionHandle.position);
+        const inactivePorts = pinNumbers.filter((pinNumber) => pinNumber !== activePinNumber).map((pinNumber) => {
+          const pinPort = getModelPinPort(resolvedPlacement, pinNumber);
+          const marker = new THREE.Mesh(new THREE.SphereGeometry(0.8, 12, 8), new THREE.MeshBasicMaterial({ color: 0xf0a53b, depthTest: false }));
+          marker.position.set(pinPort.offsetX, pinPort.offsetY, pinPort.offsetZ);
+          marker.renderOrder = 999;
+          return marker;
+        });
+        runtime.content.add(connector, ...inactivePorts, port, portHitTarget, arrow, directionHandle, directionHitTarget, new THREE.AxesHelper(12));
+        if (onPlacementChange) {
+          const canvas = runtime.renderer.domElement;
+          canvas.style.cursor = placingPinPort ? "crosshair" : "";
+          const raycaster = new THREE.Raycaster();
+          const pointer = new THREE.Vector2();
+          let draggingPointerId: number | null = null;
+          let draggingTarget: "port" | "direction" | null = null;
+          let suppressClick = false;
+          let draggedDirection = direction.clone();
+          const setPointer = (event: PointerEvent) => {
+            const bounds = canvas.getBoundingClientRect();
+            pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+            raycaster.setFromCamera(pointer, runtime.camera);
+          };
+          const connectorSurface = () => raycaster.intersectObject(connector, true).find((item) => item.object instanceof THREE.Mesh);
+          const surfaceDirection = (hit: THREE.Intersection) => hit.face?.normal.clone().transformDirection(hit.object.matrixWorld).normalize() ?? null;
+          const updatePortVisual = (position: THREE.Vector3, nextDirection: THREE.Vector3) => {
+            portPosition.copy(position);
+            draggedDirection.copy(nextDirection);
+            port.position.copy(portPosition);
+            portHitTarget.position.copy(portPosition);
+            arrow.position.copy(portPosition);
+            arrow.setDirection(draggedDirection);
+            directionHandle.position.copy(portPosition).addScaledVector(draggedDirection, 18);
+            directionHitTarget.position.copy(directionHandle.position);
+          };
+          const pointerDown = (event: PointerEvent) => {
+            if (event.button !== 0 || rotatingConnector) return;
+            setPointer(event);
+            draggingTarget = raycaster.intersectObject(portHitTarget, false).length
+              ? "port"
+              : raycaster.intersectObject(directionHitTarget, false).length ? "direction" : null;
+            if (!draggingTarget) return;
+            draggingPointerId = event.pointerId;
+            suppressClick = true;
+            runtime.controls.enabled = false;
+            canvas.setPointerCapture(event.pointerId);
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          };
+          const pointerMove = (event: PointerEvent) => {
+            if (draggingPointerId !== event.pointerId) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setPointer(event);
+            if (draggingTarget === "port") {
+              const hit = connectorSurface();
+              if (!hit) return;
+              updatePortVisual(hit.point, surfaceDirection(hit) ?? draggedDirection);
+              return;
+            }
+            const cameraDirection = runtime.camera.getWorldDirection(new THREE.Vector3());
+            const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, portPosition);
+            const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+            if (!point) return;
+            const relative = point.sub(portPosition);
+            if (relative.lengthSq() < 0.000001) return;
+            draggedDirection = relative.normalize();
+            arrow.setDirection(draggedDirection);
+            directionHandle.position.copy(portPosition).addScaledVector(draggedDirection, 18);
+            directionHitTarget.position.copy(directionHandle.position);
+          };
+          const pointerUp = (event: PointerEvent) => {
+            if (draggingPointerId !== event.pointerId) return;
+            draggingPointerId = null;
+            const committedTarget = draggingTarget;
+            draggingTarget = null;
+            runtime.controls.enabled = true;
+            if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            onPlacementChange(activePinPort
+              ? setModelPinPort(resolvedPlacement, {
+                ...activePinPort,
+                offsetX: portPosition.x,
+                offsetY: portPosition.y,
+                offsetZ: portPosition.z,
+                directionX: draggedDirection.x,
+                directionY: draggedDirection.y,
+                directionZ: draggedDirection.z,
+              })
+              : {
+                ...resolvedPlacement,
+                offsetX: portPosition.x,
+                offsetY: portPosition.y,
+                offsetZ: portPosition.z,
+                inletDirectionX: draggedDirection.x,
+                inletDirectionY: draggedDirection.y,
+                inletDirectionZ: draggedDirection.z,
+              });
+            if (committedTarget === "port") onPinPortPlaced?.();
+          };
+          const click = (event: MouseEvent) => {
+            if (suppressClick) {
+              suppressClick = false;
+              return;
+            }
+            if (!placingPinPort && !event.shiftKey) return;
+            const bounds = canvas.getBoundingClientRect();
+            pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+            raycaster.setFromCamera(pointer, runtime.camera);
+            const hit = connectorSurface();
+            if (!hit) return;
+            const nextDirection = surfaceDirection(hit) ?? draggedDirection;
+            onPlacementChange(activePinPort
+              ? setModelPinPort(resolvedPlacement, { ...activePinPort, offsetX: hit.point.x, offsetY: hit.point.y, offsetZ: hit.point.z, directionX: nextDirection.x, directionY: nextDirection.y, directionZ: nextDirection.z })
+              : { ...resolvedPlacement, offsetX: hit.point.x, offsetY: hit.point.y, offsetZ: hit.point.z, inletDirectionX: nextDirection.x, inletDirectionY: nextDirection.y, inletDirectionZ: nextDirection.z });
+            onPinPortPlaced?.();
+          };
+          const handleTransformDrag = (event: { value: unknown }) => { runtime.controls.enabled = !Boolean(event.value); };
+          const handleRotationCommit = () => {
+            if (!rotatingConnector || !rotationTarget) return;
+            const rotation = partRotationDegrees(rotationTarget);
+            onPlacementChange(rotateModelPinPorts(resolvedPlacement, rotation));
+          };
+          if (rotatingConnector && rotationTarget) {
+            runtime.transform.setMode("rotate");
+            runtime.transform.setSpace("local");
+            runtime.transform.setSize(0.75);
+            runtime.transform.attach(rotationTarget);
+          }
+          runtime.transform.addEventListener("dragging-changed", handleTransformDrag);
+          runtime.transform.addEventListener("mouseUp", handleRotationCommit);
+          canvas.addEventListener("pointerdown", pointerDown, true);
+          canvas.addEventListener("pointermove", pointerMove, true);
+          canvas.addEventListener("pointerup", pointerUp, true);
+          canvas.addEventListener("click", click);
+          if (fittedAssetIdRef.current !== asset.id) {
+            fitCamera(runtime);
+            fittedAssetIdRef.current = asset.id;
+          }
+          return () => {
+            canvas.style.cursor = "";
+            runtime.transform.removeEventListener("dragging-changed", handleTransformDrag);
+            runtime.transform.removeEventListener("mouseUp", handleRotationCommit);
+            if (runtime.transform.object === rotationTarget) runtime.transform.detach();
+            canvas.removeEventListener("pointerdown", pointerDown, true);
+            canvas.removeEventListener("pointermove", pointerMove, true);
+            canvas.removeEventListener("pointerup", pointerUp, true);
+            canvas.removeEventListener("click", click);
+          };
+        }
       } else {
         runtime.content.add(modelGroup(asset, false, 40));
       }
-      fitCamera(runtime);
+      if (fittedAssetIdRef.current !== asset.id) {
+        fitCamera(runtime);
+        fittedAssetIdRef.current = asset.id;
+      }
     }
-  }, [asset, placement, showCable]);
+  }, [asset, onPinPortPlaced, onPlacementChange, pinNumbers, placement, placingPinPort, rotatingConnector, runtimeRef, selectedPinNumber, showCable]);
   return <div className="part-3d-preview" ref={hostRef}>{!asset && <span>STEP 파일을 선택하면 3D 형상이 표시됩니다.</span>}</div>;
 }

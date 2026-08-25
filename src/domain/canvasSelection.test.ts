@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "./sample";
+import { createSampleProject } from "../test/sampleProject";
 import { deleteCanvasSelection, sameCanvasEntitySelection, sameCanvasSelection } from "./canvasSelection";
 import { validateProject } from "./validation";
 
@@ -26,7 +26,7 @@ describe("HarnessCanvas 선택 동기화", () => {
   });
 
   it("드래그로 선택한 여러 파트와 연결 데이터를 한 번에 삭제한다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     harness.accessories.push(
       { id: "acc-node-j2", partId: "part-label", quantity: 1, nodeId: "node-j2", note: "J2 라벨" },
       { id: "acc-seg-2", partId: "part-sleeve", quantity: 1, segmentId: "seg-2", note: "분기 슬리브" },
@@ -41,7 +41,7 @@ describe("HarnessCanvas 선택 동기화", () => {
   });
 
   it("중간 노드를 삭제하면 남은 전선을 같은 길이의 직접 경로로 재연결한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
 
     deleteCanvasSelection(harness, ["node-sp1"]);
@@ -56,7 +56,7 @@ describe("HarnessCanvas 선택 동기화", () => {
   });
 
   it("같은 선택 박스의 도면 주석과 부자재도 함께 삭제한다", () => {
-    const harness = createProject().harnesses[0];
+    const harness = createSampleProject().harnesses[0];
     harness.drawingAnnotations = [
       { id: "annotation-1", kind: "label", text: "삭제", position: { x: 10, y: 10 }, width: 100, height: 30 },
       { id: "annotation-2", kind: "text", text: "유지", position: { x: 20, y: 20 }, width: 100, height: 30 },

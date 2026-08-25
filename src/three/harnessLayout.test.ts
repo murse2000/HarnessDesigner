@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sampleHarness } from "../domain/sample";
-import { getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "./harnessLayout";
+import { sampleHarness } from "../test/sampleProject";
+import { conductorRouteConnectsEndpoints, directWireConductors, directWireLengthMm, getCompactCoilLayout, layoutHarnessNodes, positionHarnessRoutePoint, projectHarnessRoutePoint } from "./harnessLayout";
 
 describe("layoutHarnessNodes", () => {
   it("2D 배치 방향을 유지하면서 구간의 실제 mm 길이를 사용한다", () => {
@@ -41,6 +41,20 @@ describe("layoutHarnessNodes", () => {
     harness.nodes[1].threeDPosition = { x: 125, y: 45, z: -80 };
 
     expect(layoutHarnessNodes(harness, 180).get(harness.nodes[1].id)).toEqual({ x: 125, y: 45, z: -80 });
+  });
+
+  it("일반 전선의 구간 경로가 실제 끝점에 도달하지 않으면 직접 연결로 배치한다", () => {
+    const harness = structuredClone(sampleHarness);
+    const conductor = harness.conductors[1];
+    conductor.routeSegmentIds = [harness.segments[0].id];
+
+    expect(conductorRouteConnectsEndpoints(harness, conductor)).toBe(false);
+    expect(directWireConductors(harness).map((item) => item.id)).toContain(conductor.id);
+    expect(directWireLengthMm(harness, conductor)).toBe(harness.segments[0].lengthMm);
+    const positions = layoutHarnessNodes(harness);
+    const start = positions.get(conductor.from.nodeId)!;
+    const end = positions.get(conductor.to.nodeId)!;
+    expect(Math.hypot(end.x - start.x, end.z - start.z)).toBeCloseTo(harness.segments[0].lengthMm, 5);
   });
 
   it("컴팩트 코일은 일반 구간 1회, 매우 긴 구간도 최대 3회만 감는다", () => {

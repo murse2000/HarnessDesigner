@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createProject } from "../domain/sample";
+import { createSampleProject } from "../test/sampleProject";
 import { buildBom } from "../domain/calculations";
 import { createFormboardState } from "../domain/formboard";
 import { buildBomSvgPages, buildFormboardDxf, buildFormboardSvgPages, buildHarnessDxf, buildHarnessSvg, buildWorkInstructionSvgPages } from "./drawing";
 
 describe("제조 문서 모델", () => {
   it("하네스 SVG와 DXF에 제목·구간·커넥터를 포함한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     harness.drawingNotes = "커넥터 체결 상태 확인\n완성 후 연속성 검사";
     harness.drawingTableOffsets = {
@@ -61,7 +61,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("BOM을 31행 단위로 페이지 분할한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const rows = Array.from({ length: 32 }, (_, index) => ({ ...buildBom(project)[0], partId: `part-${index}`, partNumber: `P-${index}` }));
     const pages = buildBomSvgPages(project, rows);
     expect(pages).toHaveLength(2);
@@ -69,7 +69,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("제조 길이 기반 1:1 폼보드를 타일 도면과 DXF로 생성한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const connectorPart = project.parts.find((part) => part.id === harness.nodes[0].partId)!;
     connectorPart.symbolAssetId = "step-front-symbol";
@@ -101,7 +101,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("폼보드는 등록 심벌이 없는 STEP 부품도 투영 외곽선으로 출력한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const connectorPart = project.parts.find((part) => part.id === harness.nodes[0].partId)!;
     connectorPart.symbolAssetId = undefined;
@@ -120,7 +120,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("폼보드 양 끝 커넥터를 케이블 인입 방향으로 회전해 출력한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const segment = { ...harness.segments[0], toNodeId: "node-j2", lengthMm: 100 };
     harness.nodes = harness.nodes.filter((node) => node.id === "node-j1" || node.id === "node-j2");
@@ -137,7 +137,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("멀티코어 폼보드 출력에 중앙 외피와 실제 사용 코어 팬아웃을 포함한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const segment = harness.segments[0];
     project.parts.push({ id: "part-cable-2c", partNumber: "CBL-2C", manufacturer: "TEST", description: "2 core cable", revision: "A", category: "cable", unit: "m", color: "BK", attributes: { construction: "multiCore", coreCount: "2", outerDiameterMm: "6", coreDiameterMm: "1.2", breakoutLengthMm: "30" } });
@@ -156,7 +156,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("STEP에서 생성한 커넥터 형상을 하네스 SVG와 DXF에 매핑한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     const harness = project.harnesses[0];
     const connectorPart = project.parts.find((part) => part.id === harness.nodes[0].partId)!;
     connectorPart.symbolAssetId = "step-front-symbol";
@@ -174,7 +174,7 @@ describe("제조 문서 모델", () => {
   });
 
   it("작업 지시서를 출력 페이지로 생성한다", () => {
-    const project = createProject();
+    const project = createSampleProject();
     project.workInstructions.push({ id: "work-1", harnessId: project.harnesses[0].id, sequence: 1, kind: "inspection", title: "연속성 검사", description: "모든 회로를 검사합니다.", estimatedMinutes: 5 });
     const pages = buildWorkInstructionSvgPages(project);
     expect(pages[0]).toContain("MANUFACTURING WORK INSTRUCTIONS");

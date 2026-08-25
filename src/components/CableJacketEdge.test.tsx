@@ -96,7 +96,7 @@ describe("CableJacketEdge", () => {
       id: "cable-1", sourceX: 0, sourceY: 0, targetX: 300, targetY: 40,
       data: { entityType: "segment", locked: false, breakoutDisplayLength: 20, route: { offsetX: 0, offsetY: 0 }, gridSnap: false, gridSize: 10, onSelect: vi.fn(), onEdit: vi.fn(), onContextMenu: vi.fn(), onRoutePreview, onRouteCommit, onRouteCancel: vi.fn() },
     } as unknown as Parameters<typeof CableJacketEdge>[0];
-    const { container } = render(<CableJacketEdge {...props} />);
+    render(<CableJacketEdge {...props} />);
     const sourceGrip = screen.getByRole("button", { name: "외피 시작 길이 조절" });
 
     fireEvent.pointerDown(sourceGrip, { button: 0, pointerId: 1, clientX: 20, clientY: 0 });

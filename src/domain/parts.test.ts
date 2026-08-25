@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessNode, PartSnapshot } from "./types";
-import { createPinsFromPart, getCompatibleClampIds, getCompatibleTerminalIds, getPartName, getPartPinCount, hasMappedPinPositions, isConnectorClampPart, nextConnectorReference, resolvePinTermination } from "./parts";
+import { createPinsFromPart, getCompatibleClampIds, getCompatibleTerminalIds, getPartName, getPartPinCount, getPartPinNumbers, hasMappedPinPositions, isConnectorClampPart, nextConnectorReference, resolvePinTermination } from "./parts";
 
 const housing: PartSnapshot = {
   id: "housing-1",
@@ -18,6 +18,7 @@ describe("커넥터 부품 정보", () => {
   it("파트명과 핀 수를 라이브러리 데이터에서 읽는다", () => {
     expect(getPartName(housing)).toBe("방수 4핀 커넥터");
     expect(getPartPinCount(housing)).toBe(4);
+    expect(getPartPinNumbers(housing)).toEqual(["1", "2", "3", "4"]);
     expect(createPinsFromPart(housing).map((pin) => pin.number)).toEqual(["1", "2", "3", "4"]);
     expect(createPinsFromPart(housing).every((pin) => pin.terminalPartId === "terminal-1")).toBe(true);
     expect(getCompatibleTerminalIds(housing)).toEqual(["terminal-1"]);
@@ -30,6 +31,7 @@ describe("커넥터 부품 정보", () => {
     const first = createPinsFromPart(mapped);
     const second = createPinsFromPart(mapped);
     expect(first[0]).toMatchObject({ number: "A1", name: "POWER", position: { x: 12, y: 18 } });
+    expect(getPartPinNumbers(mapped)).toEqual(["A1"]);
     expect(first[0].id).not.toBe(second[0].id);
   });
 

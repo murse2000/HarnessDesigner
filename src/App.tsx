@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DrawingAnnotationKind, HarnessAssembly, SessionSnapshot, ViewKind } from "./domain/types";
-import { createProject } from "./domain/sample";
+import { createProject } from "./domain/project";
 import { translate } from "./i18n";
 import { backendInvoke, isTauri } from "./platform";
 import { useProjectStore } from "./store/projectStore";
@@ -36,7 +36,9 @@ import { ProductionCenterDialog } from "./components/ProductionCenterDialog";
 import { AccessoryLibraryDialog } from "./components/AccessoryLibraryDialog";
 import { canProjectRole } from "./domain/permissions";
 import { Cad3DExportDialog } from "./components/Cad3DExportDialog";
+import packageMetadata from "../package.json";
 
+const APP_VERSION = `v${packageMetadata.version}`;
 const params = new URLSearchParams(window.location.search);
 const initialSessionId = params.get("session") ?? undefined;
 const initialView = (params.get("view") as ViewKind | null) ?? "workspace";
@@ -200,7 +202,7 @@ export default function App() {
     const harness = store.snapshot.project.harnesses.find((item) => item.id === store.activeHarnessId);
     const viewName = view === "workspace" ? (isDesignWindow ? "설계 창" : translate(store.locale, "appName")) : translate(store.locale, view);
     const dirty = store.snapshot.dirty ? " ●" : "";
-    void getCurrentWindow().setTitle(`${store.snapshot.project.projectNumber} · ${harness?.number ?? viewName} · ${viewName}${dirty}`);
+    void getCurrentWindow().setTitle(`${store.snapshot.project.projectNumber} · ${harness?.number ?? viewName} · ${viewName} · ${APP_VERSION}${dirty}`);
   }, [store.snapshot, store.activeHarnessId, store.locale, view]);
 
   if (store.busy || !store.snapshot) return <div className="loading-screen"><div className="app-mark"><Cable size={26} /></div><strong>Harness Designer</strong><span>프로젝트 세션 준비 중…</span></div>;
@@ -258,7 +260,6 @@ function CommandBar({ onExport, onCadExport, onSettings }: { onExport: () => Pro
   const newProject = async () => {
     const project = createProject("NEW HARNESS PROJECT");
     applyNewProjectDefaults(project, preferences);
-    project.harnesses = [];
     if (isTauri()) {
       const created = await backendInvoke<SessionSnapshot>("create_project", { project });
       await openProjectWorkspace(created.sessionId, created.project.id, created.project.name);
@@ -290,7 +291,7 @@ function CommandBar({ onExport, onCadExport, onSettings }: { onExport: () => Pro
   };
   const visibleCommands = (Object.keys(commandLabels) as AppCommandId[]).filter((command) => command !== "commandPalette" && commandLabels[command].toLowerCase().includes(commandQuery.trim().toLowerCase()));
   return <header className="command-bar">
-    <div className="brand"><div className="brand-mark"><Cable size={17} /></div><strong>Harness Designer</strong><span>DESKTOP</span></div>
+    <div className="brand"><div className="brand-mark"><Cable size={17} /></div><strong>Harness Designer</strong><span>DESKTOP · {APP_VERSION}</span></div>
     <div className="command-group"><button onClick={() => void newProject()}><FilePlus2 size={14} />{translate(locale, "newProject")}</button><button onClick={() => void openProject()}><FolderOpen size={14} />{translate(locale, "openProject")}</button><button onClick={() => void saveProject()} disabled={snapshot.readOnly}><Save size={14} />{translate(locale, "save")}</button><button onClick={() => void openLibraryWindow(snapshot.sessionId)}><Boxes size={14} />{translate(locale, "library")}</button></div>
     <div className={`command-search ${commandOpen ? "is-open" : ""}`}><Search size={13} /><input ref={commandInput} value={commandQuery} placeholder="명령 검색…" onFocus={() => setCommandOpen(true)} onChange={(event) => { setCommandQuery(event.target.value); setCommandOpen(true); }} onKeyDown={(event) => { if (event.key === "Enter" && visibleCommands[0]) runCommand(visibleCommands[0]); if (event.key === "Escape") { setCommandOpen(false); commandInput.current?.blur(); } }} onBlur={() => window.setTimeout(() => setCommandOpen(false), 120)} /><kbd>{preferences.shortcuts.commandPalette}</kbd>{commandOpen && <div className="command-palette">{visibleCommands.map((command) => <button key={command} onMouseDown={(event) => event.preventDefault()} onClick={() => runCommand(command)}><span>{commandLabels[command]}</span><kbd>{preferences.shortcuts[command]}</kbd></button>)}{visibleCommands.length === 0 && <p>일치하는 명령이 없습니다.</p>}</div>}</div>
     <div className="command-group command-group--right"><button onClick={onCadExport}><Box size={14} />3D CAD</button><button onClick={() => void onExport()}><Download size={14} />{translate(locale, "export")}</button><IconButton title="언어 전환" onClick={() => setLocale(locale === "ko" ? "en" : "ko")}><Languages size={14} /></IconButton><IconButton title="테마 전환" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={14} /> : <Sun size={14} />}</IconButton><IconButton title="환경설정" onClick={onSettings}><Settings2 size={14} /></IconButton></div>

@@ -1,10 +1,11 @@
 import { ExternalLink, Focus, Magnet, MapPin, Minus, Plus, RotateCcw, Trash2, TriangleAlert, WandSparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { buildFormboardLayout, createFormboardState, fitFormboardSegmentRoute, formboardCableGeometry, formboardFanoutPoints, formboardNodeRouteAngle, formboardSegmentMetrics, formboardSegmentPoints, type FormboardLayout } from "../domain/formboard";
 import { resolveFormboardSymbol, resolveFormboardSymbolRouteRotation } from "../domain/formboardSymbol";
 import { hasMappedPinPositions } from "../domain/parts";
 import type { FormboardFixtureKind, FormboardLayoutState, HarnessAssembly, ModelAsset, Point, ProjectDocument, SymbolAsset } from "../domain/types";
 import { getWireColorOption } from "../domain/wireColors";
+import { formboardWheelZoom, formboardZoomScroll } from "../domain/formboardViewport";
 import { backendInvoke, isTauri } from "../platform";
 import { useProjectStore } from "../store/projectStore";
 import { hydrateLibraryModelAsset } from "../three/modelAssetHydration";
@@ -87,6 +88,7 @@ function ensureFormboard(harness: HarnessAssembly): FormboardLayoutState {
 export function FormboardEditor({ harnessId }: { harnessId?: string } = {}) {
   const { snapshot, activeHarnessId, updateProject } = useProjectStore();
   const harness = snapshot?.project.harnesses.find((item) => item.id === (harnessId ?? activeHarnessId));
+  const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const initializing = useRef<string | null>(null);
   const dragRef = useRef<FormboardDrag | null>(null);
@@ -96,7 +98,46 @@ export function FormboardEditor({ harnessId }: { harnessId?: string } = {}) {
   const [librarySymbols, setLibrarySymbols] = useState<SymbolAsset[]>([]);
   const [libraryModels, setLibraryModels] = useState<ModelAsset[]>([]);
   const [zoom, setZoom] = useState(4);
-  const changeZoom = (nextZoom: number) => setZoom(Math.max(0.25, Math.min(16, nextZoom)));
+  const zoomRef = useRef(zoom);
+  const pendingWheelScroll = useRef<{ left: number; top: number; x: number; y: number; previousZoom: number } | null>(null);
+  const changeZoom = (nextZoom: number) => {
+    const clamped = Math.max(0.25, Math.min(16, nextZoom));
+    zoomRef.current = clamped;
+    setZoom(clamped);
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => {
+      const svg = svgRef.current;
+      if (!svg || !svg.contains(event.target as Node)) return;
+      event.preventDefault();
+      const previousZoom = zoomRef.current;
+      const nextZoom = formboardWheelZoom(previousZoom, event.deltaY, event.deltaMode);
+      if (nextZoom === previousZoom) return;
+      const bounds = svg.getBoundingClientRect();
+      pendingWheelScroll.current = {
+        left: canvas.scrollLeft,
+        top: canvas.scrollTop,
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+        previousZoom,
+      };
+      changeZoom(nextZoom);
+    };
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const pending = pendingWheelScroll.current;
+    if (!canvas || !pending) return;
+    canvas.scrollLeft = formboardZoomScroll(pending.left, pending.x, pending.previousZoom, zoom);
+    canvas.scrollTop = formboardZoomScroll(pending.top, pending.y, pending.previousZoom, zoom);
+    pendingWheelScroll.current = null;
+  }, [zoom]);
 
   const symbolIds = snapshot?.project.parts.flatMap((part) => part.symbolAssetId ? [part.symbolAssetId] : []).filter((id) => !snapshot.project.assets.some((asset) => asset.id === id)) ?? [];
   const modelIds = snapshot?.project.parts.flatMap((part) => part.modelAssetId ? [part.modelAssetId] : []).filter((id) => !snapshot.project.modelAssets.some((asset) => asset.id === id)) ?? [];
@@ -292,7 +333,7 @@ export function FormboardEditor({ harnessId }: { harnessId?: string } = {}) {
       <button title="새 창에서 열기" onClick={() => void openDetachedView(snapshot.sessionId, "formboard", { harnessId: harness.id })}><ExternalLink size={12} /></button>
     </header>
     <div className="formboard-body">
-      <div className={`formboard-canvas ${fixtureMode ? "is-fixture-mode" : ""}`}>
+      <div ref={canvasRef} className={`formboard-canvas ${fixtureMode ? "is-fixture-mode" : ""}`}>
         <svg ref={svgRef} width={board.width * zoom} height={board.height * zoom} viewBox={`${board.x} ${board.y} ${board.width} ${board.height}`} onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={() => finishDrag()}>
           <defs><pattern id="formboard-grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M 25 0 L 0 0 0 25" /></pattern></defs>
           <rect className="formboard-paper" x={board.x} y={board.y} width={board.width} height={board.height} onPointerDown={addFixture} />

@@ -30,6 +30,12 @@ export function getPartPinCount(part: PartSnapshot): number {
   return Number.isInteger(count) && count > 0 ? count : 0;
 }
 
+export function getPartPinNumbers(part: PartSnapshot): string[] {
+  const pins = storedPinMap(part);
+  if (pins.length) return pins.map((pin) => pin.number);
+  return Array.from({ length: getPartPinCount(part) }, (_, index) => String(index + 1));
+}
+
 export function getCompatibleTerminalIds(part: PartSnapshot): string[] {
   return parsePartIds(part.attributes.compatibleTerminalPartIds);
 }

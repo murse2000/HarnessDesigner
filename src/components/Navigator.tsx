@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Box, Cable, ChevronRight, CircleDot, Clipboard, Copy, FolderTree, GitFork, Pencil, Plus, Trash2 } from "lucide-react";
-import { sampleHarness } from "../domain/sample";
+import { createHarness } from "../domain/project";
 import { translate } from "../i18n";
 import { useProjectStore } from "../store/projectStore";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -12,15 +12,7 @@ export function Navigator({ onDetach, detached = false }: { onDetach?: () => voi
   if (!snapshot) return null;
   const addHarness = () => void updateProject((project) => {
     const index = project.harnesses.length + 1;
-    const harness = structuredClone(sampleHarness);
-    harness.id = crypto.randomUUID();
-    harness.number = `HNS-${String(index).padStart(3, "0")}`;
-    harness.name = "NEW HARNESS";
-    harness.nodes = [];
-    harness.segments = [];
-    harness.conductors = [];
-    harness.accessories = [];
-    project.harnesses.push(harness);
+    project.harnesses.push(createHarness(index));
   });
   const duplicateHarness = (harnessId: string) => {
     let createdId: string | undefined;
