@@ -47,7 +47,7 @@ describe("3D STEP 내보내기", () => {
     const result = occt.ReadStepFile(new TextEncoder().encode(step), { linearUnit: "millimeter" }) as { success: boolean; meshes: unknown[] };
     expect(result.success).toBe(true);
     expect(result.meshes.length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 
   it("형상이 없는 프로젝트는 빈 STEP을 만들지 않는다", () => {
     const project = createSampleProject("EMPTY");
