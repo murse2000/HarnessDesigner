@@ -14,8 +14,6 @@
     "core:window:allow-set-size",
     "core:window:allow-available-monitors",
     "core:window:allow-primary-monitor",
-    "dialog:default",
-    "updater:default",
-    "process:allow-restart"
+    "dialog:default"
   ]
 }

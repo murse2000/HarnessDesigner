@@ -55,7 +55,7 @@ import {
   type WireRunDraft2D,
 } from "./model";
 
-const APP_VERSION = "0.3.34";
+const APP_VERSION = "0.3.35";
 
 type HistoryState = {
   past: Project2D[];
