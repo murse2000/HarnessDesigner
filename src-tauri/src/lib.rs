@@ -84,9 +84,16 @@ fn write_rebuilt_binary_file(path: String, content: Vec<u8>) -> Result<(), Strin
     write_rebuilt_binary(&PathBuf::from(path), &content)
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn print_rebuilt_webview(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+fn print_rebuilt_webview() -> Result<(), String> {
+    Err("모바일에서는 시스템 인쇄를 지원하지 않습니다.".into())
 }
 
 #[tauri::command]
