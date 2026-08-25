@@ -1473,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "harness-designer"
-version = "0.3.36"
+version = "0.3.37"
 dependencies = [
  "rusqlite",
  "serde",

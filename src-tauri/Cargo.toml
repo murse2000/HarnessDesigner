@@ -1,6 +1,6 @@
 [package]
 name = "harness-designer"
-version = "0.3.36"
+version = "0.3.37"
 description = "Cross-platform wiring harness design application"
 authors = ["Harness Designer"]
 edition = "2021"
