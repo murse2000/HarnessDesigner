@@ -14,8 +14,9 @@ import {
   type LibrarySummary2D,
 } from "./library";
 import type { ConnectorDraft } from "./model";
-import { drawingPathData } from "./dxfSymbol";
+import { drawingPathData, partDrawingStrokeWidth } from "./dxfSymbol";
 import { PartSymbolEditor } from "./PartSymbolEditor";
+import { preferStepShadedDrawing } from "./stepSymbol";
 
 type LibraryManagerProps = {
   summary: LibrarySummary2D | null;
@@ -226,22 +227,23 @@ function PartEditor({ draft, onDraftChange, onNew, onSave, onDelete, disabled }:
 
 function LibraryDrawingThumbnail({ part }: { part: LibraryPart2D }) {
   if (!part.drawing) return <span className="hd2-library-drawing-thumb is-empty" aria-label={`${part.partNumber} 2D 도면 없음`}>도면 없음</span>;
-  return <span className="hd2-library-drawing-thumb" aria-label={`${part.partNumber} 2D 도면 등록됨`} title={part.drawing.sourceName}>
-    <svg viewBox={`0 0 ${part.drawing.widthMm} ${part.drawing.heightMm}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      {part.drawing.imageDataUrl && <image href={part.drawing.imageDataUrl} width={part.drawing.widthMm} height={part.drawing.heightMm} preserveAspectRatio="none" />}
-      {part.drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} style={{ strokeWidth: part.drawing!.outlineStrength ?? 1 }} />)}
+  const drawing = preferStepShadedDrawing(part.drawing);
+  return <span className="hd2-library-drawing-thumb" aria-label={`${part.partNumber} 2D 도면 등록됨`} title={drawing.sourceName}>
+    <svg viewBox={`0 0 ${drawing.widthMm} ${drawing.heightMm}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      {drawing.imageDataUrl && <image href={drawing.imageDataUrl} width={drawing.widthMm} height={drawing.heightMm} preserveAspectRatio="none" />}
+      {drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} style={{ strokeWidth: partDrawingStrokeWidth(drawing.outlineStrength) }} />)}
     </svg>
     <b>2D</b>
   </span>;
 }
 
 function DrawingPreview({ draft }: { draft: LibraryPartDraft2D }) {
-  const drawing = draft.drawing!;
+  const drawing = preferStepShadedDrawing(draft.drawing!);
   return <section className="hd2-library-drawing-preview">
     <header><strong>2D DRAWING</strong><span>{drawing.sourceName}</span><em>{drawing.widthMm.toFixed(2)} × {drawing.heightMm.toFixed(2)} mm</em></header>
     <svg viewBox={`0 0 ${drawing.widthMm} ${drawing.heightMm}`} preserveAspectRatio="xMidYMid meet">
       {drawing.imageDataUrl && <image href={drawing.imageDataUrl} width={drawing.widthMm} height={drawing.heightMm} preserveAspectRatio="none" />}
-      {drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} style={{ strokeWidth: drawing.outlineStrength ?? 1 }} />)}
+      {drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} style={{ strokeWidth: partDrawingStrokeWidth(drawing.outlineStrength) }} />)}
       {draft.pins.map((pin, index) => pin.anchor && <g key={index}><circle cx={pin.anchor.xMm} cy={pin.anchor.yMm} r={Math.max(drawing.widthMm, drawing.heightMm) / 70} /><text x={pin.anchor.xMm} y={pin.anchor.yMm}>{pin.number}</text></g>)}
     </svg>
   </section>;
@@ -256,6 +258,7 @@ function cloneLibraryPart(part: LibraryPart2D): LibraryPartDraft2D {
       ...part.drawing,
       paths: part.drawing.paths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })),
       unsupportedEntities: part.drawing.unsupportedEntities.map((item) => ({ ...item })),
+      editorState: part.drawing.editorState ? structuredClone(part.drawing.editorState) : undefined,
     } : undefined,
   };
 }

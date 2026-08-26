@@ -154,6 +154,10 @@ button:disabled { opacity: .42; cursor: default; }
 .hd2-connector-body { fill: #f7f9fb; stroke: #8399ab; stroke-width: 1.5; }
 .hd2-connector.is-selected .hd2-connector-body { stroke: var(--hd2-accent); stroke-width: 2.5; }
 .hd2-part-symbol-hit, .hd2-part-symbol-hit.is-selected { fill: transparent; stroke: transparent; }
+.hd2-component-scale-selection { fill: none; stroke: var(--hd2-accent); stroke-width: 1; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hd2-component-scale-control { cursor: nwse-resize; pointer-events: all; }
+.hd2-component-scale-hit { fill: transparent; stroke: none; pointer-events: all; }
+.hd2-component-scale-handle { fill: var(--hd2-accent); stroke: white; stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
 .hd2-part-symbol path { fill: none; stroke: #173f59; stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; }
 .hd2-symbol-reference { fill: #0c4d70; font-size: 11px; font-weight: 700; }
 .hd2-symbol-name { fill: #64788a; font-size: 9px; font-weight: 600; }
@@ -197,11 +201,23 @@ button:disabled { opacity: .42; cursor: default; }
 .hd2-cable-jacket.is-selected { stroke: var(--hd2-accent); filter: drop-shadow(0 0 2px #4aa6d5); }
 .hd2-cable-hit { fill: none; stroke: transparent; stroke-width: 24; cursor: pointer; }
 .hd2-cable-collar { fill: #314b61; pointer-events: none; }
+.hd2-heat-shrink-hit { fill: none; stroke: transparent; stroke-width: 30; cursor: grab; }
+.hd2-heat-shrink-hit:active { cursor: grabbing; }
+.hd2-heat-shrink-body { fill: none; stroke-linecap: butt; stroke-linejoin: round; pointer-events: none; filter: drop-shadow(0 1px 1px #10202a66); }
+.hd2-heat-shrink-highlight { fill: none; stroke: #ffffff; stroke-linecap: butt; opacity: 0.2; pointer-events: none; }
+.hd2-heat-shrink.is-selected .hd2-heat-shrink-body { filter: drop-shadow(0 0 3px #13a6aa); }
+.hd2-heat-shrink-label { font-size: 8px; font-weight: 800; letter-spacing: 0.35px; paint-order: stroke; stroke: #0008; stroke-width: 1.5px; cursor: text; filter: drop-shadow(0 1px 1px #0008); }
+.hd2-heat-shrink-input-wrap { overflow: visible; }
+.hd2-heat-shrink-input { width: 100%; height: 22px; padding: 0 5px; color: var(--hd2-text); background: #fff; border: 1px solid var(--hd2-accent); border-radius: 2px; font-family: inherit; font-size: 10px; font-weight: 700; line-height: 20px; text-align: center; box-shadow: 0 2px 8px #23394d40; }
+.hd2-heat-shrink-handle { fill: #13a6aa; stroke: #fff; stroke-width: 2; cursor: ew-resize; filter: drop-shadow(0 1px 2px #4567); }
+.hd2-heat-shrink-handle:hover { fill: #0b8589; }
 .hd2-cable-label { cursor: move; }
 .hd2-cable-label text { fill: #354a5e; paint-order: stroke; stroke: var(--hd2-canvas); stroke-width: 5px; font-size: 11px; font-weight: 700; text-anchor: middle; }
 .hd2-cable-label.is-selected text { fill: var(--hd2-accent); stroke: var(--hd2-accent-soft); }
 .hd2-route-handle { fill: #13a6aa; stroke: #fff; stroke-width: 2; cursor: move; filter: drop-shadow(0 1px 2px #4567); }
 .hd2-route-handle:hover { fill: #0b8589; }
+.hd2-cable-breakout-handle { fill: #13a6aa; stroke: #fff; stroke-width: 2; cursor: move; filter: drop-shadow(0 1px 2px #4567); }
+.hd2-cable-breakout-handle:hover { fill: #0b8589; }
 .hd2-annotation { cursor: move; }
 .hd2-annotation-hit { fill: transparent; stroke: none; }
 .hd2-annotation > rect:not(.hd2-annotation-hit):not(.hd2-annotation-selection):not(.hd2-annotation-resize),
@@ -369,14 +385,14 @@ button:disabled { opacity: .42; cursor: default; }
 .hd2-symbol-file-input { display: none; }
 .hd2-symbol-toolbar { display: flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--hd2-panel-2); border-bottom: 1px solid var(--hd2-border); }
 .hd2-symbol-toolbar span { margin-left: auto; color: var(--hd2-text-3); font-size: 10px; }
-.hd2-symbol-pages { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
-.hd2-symbol-pages button { width: 25px; padding: 0; }
-.hd2-symbol-pages b { min-width: 42px; color: var(--hd2-text-2); font-size: 10px; text-align: center; }
 .hd2-symbol-step-rotation { display: inline-flex; align-items: center; gap: 4px; padding-left: 5px; border-left: 1px solid var(--hd2-border); }
 .hd2-symbol-step-rotation > b { color: var(--hd2-text-2); font-size: 10px; white-space: nowrap; }
 .hd2-symbol-step-rotation label { display: inline-flex; align-items: center; gap: 2px; }
 .hd2-symbol-step-rotation label span, .hd2-symbol-step-rotation label em { margin: 0; color: var(--hd2-text-3); font-size: 9px; font-style: normal; }
 .hd2-symbol-step-rotation input { width: 52px; height: 24px; padding: 0 4px; color: var(--hd2-text); background: var(--hd2-panel); border: 1px solid var(--hd2-border); border-radius: 2px; }
+.hd2-symbol-render-mode { display: inline-flex; align-items: center; gap: 3px; padding-left: 5px; border-left: 1px solid var(--hd2-border); }
+.hd2-symbol-render-mode > b { color: var(--hd2-text-2); font-size: 10px; white-space: nowrap; }
+.hd2-symbol-render-mode button { height: 24px; padding: 0 6px; font-size: 10px; }
 .hd2-symbol-outline-strength { height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 0 5px; border-left: 1px solid var(--hd2-border); }
 .hd2-symbol-outline-strength span { margin: 0; color: var(--hd2-text-2); font-size: 10px; white-space: nowrap; }
 .hd2-symbol-outline-strength input { width: 82px; accent-color: var(--hd2-accent); }
@@ -390,11 +406,13 @@ button:disabled { opacity: .42; cursor: default; }
 .hd2-step-gesture-help span { display: inline-flex; gap: 3px; }
 .hd2-step-gesture-help b { color: var(--hd2-accent-dark); }
 .hd2-symbol-background { fill: #f9fbfc; }
-.hd2-symbol-source path { fill: none; stroke: #284a61; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.hd2-symbol-source path { fill: none; stroke: #173f59; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .hd2-symbol-source.is-step-source path { stroke: #173f59; }
+.hd2-step-surfaces polygon { stroke: none; cursor: default; }
+.hd2-step-surfaces polygon.is-selected { stroke: #00a8a8; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+.hd2-symbol-canvas > svg:not(.is-step-rotating) .hd2-step-surfaces polygon { cursor: pointer; }
 .hd2-symbol-pdf-page { pointer-events: none; }
 .hd2-symbol-selection { fill: rgb(22 133 179 / 8%); stroke: #1185b8; stroke-dasharray: 8 5; vector-effect: non-scaling-stroke; }
-.hd2-symbol-calibration { fill: #f08a24; stroke: #f08a24; vector-effect: non-scaling-stroke; }
 .hd2-symbol-pin line { stroke: #02a8a7; vector-effect: non-scaling-stroke; }
 .hd2-symbol-pin circle { fill: #0ca7a6; stroke: white; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: move; }
 .hd2-symbol-pin.is-active circle { fill: #ff9e2d; }

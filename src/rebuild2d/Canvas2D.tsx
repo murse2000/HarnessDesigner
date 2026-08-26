@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
-import { cableRunGeometry, connectorBounds, connectorHeight, connectorSize, CONNECTOR_HEADER_HEIGHT, CONNECTOR_INFO_HEIGHT, CONNECTOR_WIDTH, defaultRoutePoint, endpointPosition, orthogonalPath, pinPosition, PIN_ROW_HEIGHT, routedPath } from "./geometry";
-import { drawingPathData } from "./dxfSymbol";
-import type { ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D } from "./model";
+import { cableRunGeometry, connectorBounds, connectorHeight, connectorSize, CONNECTOR_HEADER_HEIGHT, CONNECTOR_INFO_HEIGHT, CONNECTOR_WIDTH, defaultRoutePoint, endpointPosition, orthogonalPath, pinPosition, PIN_ROW_HEIGHT, routedPath, routedPointAtRatio, routedRatioAtPoint, routedSlicePath, sampleRoutedPath } from "./geometry";
+import { drawingPathData, partDrawingStrokeWidth } from "./dxfSymbol";
+import type { CableHeatShrink2D, CableRunBreakout2D, ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D } from "./model";
 import type { Settings2D } from "./settings";
 
 export type CanvasSelection = {
@@ -18,20 +18,25 @@ type Props = {
   selection: CanvasSelection;
   selectedLabel: SelectedConnectorLabel | null;
   selectedAnnotationId: string | null;
+  selectedHeatShrinkId: string | null;
   onSelectionChange: (selection: CanvasSelection) => void;
   onSelectComponentLabel: (selection: SelectedConnectorLabel) => void;
   onSelectAnnotation: (annotationId: string | null) => void;
+  onSelectHeatShrink: (heatShrinkId: string | null) => void;
   onMoveSelection: (selection: CanvasSelection, delta: Point2D) => void;
   onMoveConnectionRoute: (connectionId: string, point: Point2D) => void;
   onMoveCableRunRoute: (cableRunId: string, point: Point2D) => void;
+  onMoveCableRunBreakout: (cableRunId: string, end: keyof CableRunBreakout2D, point: Point2D) => void;
   onMoveCableRunLabel: (cableRunId: string, offset: Point2D) => void;
   onMoveComponentLabel: (componentId: string, label: ConnectorLabelKind, offset: Point2D) => void;
   onMoveComponentPinMap: (componentId: string, offset: Point2D) => void;
+  onResizeComponent: (componentId: string, displayScale: number) => void;
   onRenameConnection: (connectionId: string, reference: string) => void;
   onUpdateProjectMetadata: (changes: Partial<Pick<Project2D, "projectNumber" | "name">>) => void;
   onUpdateHarnessMetadata: (changes: Partial<Pick<Harness2D, "partNumber" | "name" | "revision">>) => void;
   onUpdateTitleBlock: (changes: Partial<DrawingTitleBlock2D>) => void;
   onUpdateAnnotation: (annotationId: string, changes: Partial<Omit<DrawingAnnotation2D, "id" | "kind">>) => void;
+  onUpdateHeatShrink: (heatShrinkId: string, changes: Partial<Pick<CableHeatShrink2D, "text" | "startRatio" | "endRatio">>) => void;
   onConnect: (from: PinEndpoint2D, to: PinEndpoint2D) => void;
   onMousePositionChange: (point: Point2D | null) => void;
 };
@@ -61,6 +66,12 @@ type DraftConnection = {
 type RouteDrag = {
   kind: "connection" | "cableRun";
   id: string;
+  pointerId: number;
+};
+
+type CableRunBreakoutDrag = {
+  cableRunId: string;
+  end: keyof CableRunBreakout2D;
   pointerId: number;
 };
 
@@ -108,8 +119,23 @@ type AnnotationDrag = {
   pointerId: number;
 };
 
+type ComponentScaleDrag = {
+  componentId: string;
+  pointerId: number;
+  center: Point2D;
+  startDistance: number;
+  startScale: number;
+};
+
+type HeatShrinkDrag = {
+  heatShrink: CableHeatShrink2D;
+  mode: "move" | "start" | "end";
+  pointerStartRatio: number;
+  pointerId: number;
+};
+
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
-export function Canvas2D({ harness, projectNumber, projectName, settings, selection, selectedLabel, selectedAnnotationId, onSelectionChange, onSelectComponentLabel, onSelectAnnotation, onMoveSelection, onMoveConnectionRoute, onMoveCableRunRoute, onMoveCableRunLabel, onMoveComponentLabel, onMoveComponentPinMap, onRenameConnection, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock, onUpdateAnnotation, onConnect, onMousePositionChange }: Props) {
+export function Canvas2D({ harness, projectNumber, projectName, settings, selection, selectedLabel, selectedAnnotationId, selectedHeatShrinkId, onSelectionChange, onSelectComponentLabel, onSelectAnnotation, onSelectHeatShrink, onMoveSelection, onMoveConnectionRoute, onMoveCableRunRoute, onMoveCableRunBreakout, onMoveCableRunLabel, onMoveComponentLabel, onMoveComponentPinMap, onResizeComponent, onRenameConnection, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock, onUpdateAnnotation, onUpdateHeatShrink, onConnect, onMousePositionChange }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, pan: { x: 40, y: 40 } });
   const [componentDrag, setComponentDrag] = useState<ComponentDrag | null>(null);
@@ -120,6 +146,8 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
   const [draftConnection, setDraftConnection] = useState<DraftConnection | null>(null);
   const [routeDrag, setRouteDrag] = useState<RouteDrag | null>(null);
   const [previewRoutePoint, setPreviewRoutePoint] = useState<Point2D | null>(null);
+  const [cableRunBreakoutDrag, setCableRunBreakoutDrag] = useState<CableRunBreakoutDrag | null>(null);
+  const [previewCableRunBreakoutPoint, setPreviewCableRunBreakoutPoint] = useState<Point2D | null>(null);
   const [labelDrag, setLabelDrag] = useState<LabelDrag | null>(null);
   const [previewLabelOffsets, setPreviewLabelOffsets] = useState<Record<string, Partial<Record<ConnectorLabelKind, Point2D>>>>({});
   const [pinMapDrag, setPinMapDrag] = useState<PinMapDrag | null>(null);
@@ -130,6 +158,10 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
   const [marqueeDrag, setMarqueeDrag] = useState<MarqueeDrag | null>(null);
   const [annotationDrag, setAnnotationDrag] = useState<AnnotationDrag | null>(null);
   const [previewAnnotation, setPreviewAnnotation] = useState<DrawingAnnotation2D | null>(null);
+  const [componentScaleDrag, setComponentScaleDrag] = useState<ComponentScaleDrag | null>(null);
+  const [previewComponentScales, setPreviewComponentScales] = useState<Record<string, number>>({});
+  const [heatShrinkDrag, setHeatShrinkDrag] = useState<HeatShrinkDrag | null>(null);
+  const [previewHeatShrink, setPreviewHeatShrink] = useState<CableHeatShrink2D | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const snap = (value: number) => settings.gridSnap ? Math.round(value / settings.gridSize) * settings.gridSize : value;
@@ -170,7 +202,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
   }, []);
 
   const visibleHarness = useMemo<Harness2D>(() => {
-    if (Object.keys(previewPositions).length === 0 && Object.keys(previewConnectionRoutes).length === 0 && Object.keys(previewCableRunRoutes).length === 0 && Object.keys(previewLabelOffsets).length === 0 && Object.keys(previewPinMapOffsets).length === 0 && Object.keys(previewCableLabelOffsets).length === 0) return harness;
+    if (Object.keys(previewPositions).length === 0 && Object.keys(previewConnectionRoutes).length === 0 && Object.keys(previewCableRunRoutes).length === 0 && !previewCableRunBreakoutPoint && Object.keys(previewLabelOffsets).length === 0 && Object.keys(previewPinMapOffsets).length === 0 && Object.keys(previewCableLabelOffsets).length === 0 && Object.keys(previewComponentScales).length === 0 && !previewHeatShrink) return harness;
     const placements = { ...harness.drawing.componentPlacements };
     Object.entries(previewPositions).forEach(([componentId, position]) => {
       const current = placements[componentId];
@@ -189,6 +221,10 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       const current = placements[componentId];
       if (current) placements[componentId] = { ...current, pinMapOffset };
     });
+    Object.entries(previewComponentScales).forEach(([componentId, displayScale]) => {
+      const current = placements[componentId];
+      if (current) placements[componentId] = { ...current, displayScale };
+    });
     const connectionRoutes = { ...harness.drawing.connectionRoutes };
     Object.entries(previewConnectionRoutes).forEach(([connectionId, point]) => {
       connectionRoutes[connectionId] = { point };
@@ -197,9 +233,17 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     Object.entries(previewCableRunRoutes).forEach(([cableRunId, point]) => {
       cableRunRoutes[cableRunId] = { point };
     });
+    const cableRunBreakouts = { ...harness.drawing.cableRunBreakouts };
+    if (cableRunBreakoutDrag && previewCableRunBreakoutPoint) {
+      cableRunBreakouts[cableRunBreakoutDrag.cableRunId] = {
+        ...cableRunBreakouts[cableRunBreakoutDrag.cableRunId],
+        [cableRunBreakoutDrag.end]: previewCableRunBreakoutPoint,
+      };
+    }
     const cableRunLabelOffsets = { ...harness.drawing.cableRunLabelOffsets, ...previewCableLabelOffsets };
-    return { ...harness, drawing: { ...harness.drawing, componentPlacements: placements, connectionRoutes, cableRunRoutes, cableRunLabelOffsets } };
-  }, [harness, previewCableLabelOffsets, previewCableRunRoutes, previewConnectionRoutes, previewLabelOffsets, previewPinMapOffsets, previewPositions]);
+    const cableHeatShrinks = (harness.drawing.cableHeatShrinks ?? []).map((heatShrink) => previewHeatShrink?.id === heatShrink.id ? previewHeatShrink : heatShrink);
+    return { ...harness, drawing: { ...harness.drawing, componentPlacements: placements, connectionRoutes, cableRunRoutes, cableRunBreakouts, cableRunLabelOffsets, cableHeatShrinks } };
+  }, [cableRunBreakoutDrag, harness, previewCableLabelOffsets, previewCableRunBreakoutPoint, previewCableRunRoutes, previewComponentScales, previewConnectionRoutes, previewHeatShrink, previewLabelOffsets, previewPinMapOffsets, previewPositions]);
 
   const toWorld = (clientX: number, clientY: number): Point2D => {
     const bounds = svgRef.current?.getBoundingClientRect();
@@ -226,6 +270,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     if (event.button === 0) {
       event.preventDefault();
       onSelectAnnotation(null);
+      onSelectHeatShrink(null);
       event.currentTarget.setPointerCapture?.(event.pointerId);
       const start = toWorld(event.clientX, event.clientY);
       setMarqueeDrag({ start, current: start, pointerId: event.pointerId, additive: event.shiftKey });
@@ -263,6 +308,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     }
     if (draftConnection) setDraftConnection({ ...draftConnection, pointer: world });
     if (routeDrag) setPreviewRoutePoint({ x: snap(world.x), y: snap(world.y) });
+    if (cableRunBreakoutDrag) setPreviewCableRunBreakoutPoint({ x: snap(world.x), y: snap(world.y) });
     if (labelDrag) {
       const offset = {
         x: snap(labelDrag.offsetStart.x + world.x - labelDrag.pointerStart.x),
@@ -300,6 +346,29 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
         width: Math.max(10, annotationDrag.original.width + delta.x),
         height: Math.max(10, annotationDrag.original.height + delta.y),
       });
+    }
+    if (componentScaleDrag) {
+      const distance = Math.max(1, Math.hypot(world.x - componentScaleDrag.center.x, world.y - componentScaleDrag.center.y));
+      const displayScale = Math.round(clamp(componentScaleDrag.startScale * distance / componentScaleDrag.startDistance, 0.2, 5) * 20) / 20;
+      setPreviewComponentScales({ [componentScaleDrag.componentId]: displayScale });
+    }
+    if (heatShrinkDrag) {
+      const cableRun = visibleHarness.cableRuns.find((item) => item.id === heatShrinkDrag.heatShrink.cableRunId);
+      if (cableRun) {
+        const geometry = cableRunGeometry(visibleHarness, cableRun.id);
+        const routePoint = visibleHarness.drawing.cableRunRoutes?.[cableRun.id]?.point;
+        const ratio = routedRatioAtPoint(sampleRoutedPath(geometry.fromJunction, geometry.toJunction, routePoint), world);
+        const minimum = 0.03;
+        if (heatShrinkDrag.mode === "move") {
+          const span = heatShrinkDrag.heatShrink.endRatio - heatShrinkDrag.heatShrink.startRatio;
+          const startRatio = clamp(heatShrinkDrag.heatShrink.startRatio + ratio - heatShrinkDrag.pointerStartRatio, 0, 1 - span);
+          setPreviewHeatShrink({ ...heatShrinkDrag.heatShrink, startRatio, endRatio: startRatio + span });
+        } else if (heatShrinkDrag.mode === "start") {
+          setPreviewHeatShrink({ ...heatShrinkDrag.heatShrink, startRatio: clamp(ratio, 0, heatShrinkDrag.heatShrink.endRatio - minimum) });
+        } else {
+          setPreviewHeatShrink({ ...heatShrinkDrag.heatShrink, endRatio: clamp(ratio, heatShrinkDrag.heatShrink.startRatio + minimum, 1) });
+        }
+      }
     }
     if (marqueeDrag) setMarqueeDrag({ ...marqueeDrag, current: world });
   };
@@ -344,6 +413,14 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     }
     setRouteDrag(null);
     setPreviewRoutePoint(null);
+    if (cableRunBreakoutDrag && previewCableRunBreakoutPoint && event.type !== "pointercancel") {
+      onMoveCableRunBreakout(cableRunBreakoutDrag.cableRunId, cableRunBreakoutDrag.end, previewCableRunBreakoutPoint);
+    }
+    if (cableRunBreakoutDrag && svgRef.current?.hasPointerCapture?.(cableRunBreakoutDrag.pointerId)) {
+      svgRef.current.releasePointerCapture?.(cableRunBreakoutDrag.pointerId);
+    }
+    setCableRunBreakoutDrag(null);
+    setPreviewCableRunBreakoutPoint(null);
     if (labelDrag) {
       const offset = previewLabelOffsets[labelDrag.componentId]?.[labelDrag.label];
       if (offset) onMoveComponentLabel(labelDrag.componentId, labelDrag.label, offset);
@@ -375,6 +452,21 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     }
     setAnnotationDrag(null);
     setPreviewAnnotation(null);
+    if (componentScaleDrag) {
+      const displayScale = previewComponentScales[componentScaleDrag.componentId];
+      if (displayScale !== undefined && event.type !== "pointercancel") onResizeComponent(componentScaleDrag.componentId, displayScale);
+      if (svgRef.current?.hasPointerCapture?.(componentScaleDrag.pointerId)) svgRef.current.releasePointerCapture?.(componentScaleDrag.pointerId);
+    }
+    setComponentScaleDrag(null);
+    setPreviewComponentScales({});
+    if (heatShrinkDrag && previewHeatShrink && event.type !== "pointercancel") {
+      onUpdateHeatShrink(heatShrinkDrag.heatShrink.id, { startRatio: previewHeatShrink.startRatio, endRatio: previewHeatShrink.endRatio });
+    }
+    if (heatShrinkDrag && svgRef.current?.hasPointerCapture?.(heatShrinkDrag.pointerId)) {
+      svgRef.current.releasePointerCapture?.(heatShrinkDrag.pointerId);
+    }
+    setHeatShrinkDrag(null);
+    setPreviewHeatShrink(null);
     setDraftConnection(null);
   };
 
@@ -415,6 +507,28 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     setComponentDrag({ selection: dragSelection, pointerStart: toWorld(event.clientX, event.clientY), delta: { x: 0, y: 0 }, pointerId: event.pointerId });
   };
 
+  const beginComponentScaleDrag = (
+    event: ReactPointerEvent<SVGGElement>,
+    connector: Connector2D,
+    placement: ComponentPlacement2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const size = connectorSize(connector, placement);
+    const center = { x: placement.position.x + size.width / 2, y: placement.position.y + size.height / 2 };
+    const pointer = toWorld(event.clientX, event.clientY);
+    onSelectionChange({ componentIds: [connector.id], connectionIds: [], cableRunIds: [] });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setComponentScaleDrag({
+      componentId: connector.id,
+      pointerId: event.pointerId,
+      center,
+      startDistance: Math.max(1, Math.hypot(pointer.x - center.x, pointer.y - center.y)),
+      startScale: placement.displayScale ?? 1,
+    });
+  };
+
   const beginConnection = (event: ReactPointerEvent<SVGCircleElement>, endpoint: PinEndpoint2D) => {
     if (event.button !== 0) return;
     event.stopPropagation();
@@ -448,6 +562,21 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     svgRef.current?.setPointerCapture?.(event.pointerId);
     setRouteDrag({ kind, id, pointerId: event.pointerId });
     setPreviewRoutePoint(point);
+  };
+
+  const beginCableRunBreakoutDrag = (
+    event: ReactPointerEvent<SVGCircleElement>,
+    cableRunId: string,
+    end: keyof CableRunBreakout2D,
+    point: Point2D,
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [cableRunId] });
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setCableRunBreakoutDrag({ cableRunId, end, pointerId: event.pointerId });
+    setPreviewCableRunBreakoutPoint(point);
   };
 
   const beginLabelDrag = (
@@ -491,6 +620,24 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [cableRunId] });
     svgRef.current?.setPointerCapture?.(event.pointerId);
     setCableLabelDrag({ cableRunId, pointerStart: toWorld(event.clientX, event.clientY), offsetStart: offset, pointerId: event.pointerId });
+  };
+
+  const beginHeatShrinkDrag = (
+    event: ReactPointerEvent<SVGElement>,
+    heatShrink: CableHeatShrink2D,
+    mode: HeatShrinkDrag["mode"],
+  ) => {
+    if (event.button !== 0 || spacePressed) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const geometry = cableRunGeometry(visibleHarness, heatShrink.cableRunId);
+    const routePoint = visibleHarness.drawing.cableRunRoutes?.[heatShrink.cableRunId]?.point;
+    const pointerStartRatio = routedRatioAtPoint(sampleRoutedPath(geometry.fromJunction, geometry.toJunction, routePoint), toWorld(event.clientX, event.clientY));
+    onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [] });
+    onSelectHeatShrink(heatShrink.id);
+    svgRef.current?.setPointerCapture?.(event.pointerId);
+    setHeatShrinkDrag({ heatShrink, mode, pointerStartRatio, pointerId: event.pointerId });
+    setPreviewHeatShrink(heatShrink);
   };
 
   const beginAnnotationDrag = (
@@ -562,7 +709,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onPointerLeave={() => {
-        if (!componentDrag && !panDrag && !routeDrag && !marqueeDrag && !annotationDrag) onMousePositionChange(null);
+        if (!componentDrag && !panDrag && !routeDrag && !cableRunBreakoutDrag && !marqueeDrag && !annotationDrag) onMousePositionChange(null);
       }}
       onWheel={handleWheel}
       aria-label="하네스 2D 도면"
@@ -602,6 +749,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
               : savedRoutePoint;
             const handlePoint = routePoint ?? defaultRoutePoint(geometry.fromJunction, geometry.toJunction);
             const jacketPath = routedPath(geometry.fromJunction, geometry.toJunction, routePoint);
+            const routePoints = sampleRoutedPath(geometry.fromJunction, geometry.toJunction, routePoint);
             const jacketWidth = clamp(cableRun.outerDiameterMm * 2, 8, 18);
             const labelOffset = visibleHarness.drawing.cableRunLabelOffsets?.[cableRun.id] ?? { x: 0, y: -jacketWidth - 7 };
             return <g key={cableRun.id}>
@@ -619,6 +767,32 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
               <path className={`hd2-cable-jacket${selected ? " is-selected" : ""}`} d={jacketPath} style={{ strokeWidth: jacketWidth }} />
               <circle className="hd2-cable-collar" cx={geometry.fromJunction.x} cy={geometry.fromJunction.y} r={jacketWidth / 2 + 2} />
               <circle className="hd2-cable-collar" cx={geometry.toJunction.x} cy={geometry.toJunction.y} r={jacketWidth / 2 + 2} />
+              {(visibleHarness.drawing.cableHeatShrinks ?? []).filter((heatShrink) => heatShrink.cableRunId === cableRun.id).map((heatShrink) => {
+                const heatShrinkSelected = selectedHeatShrinkId === heatShrink.id;
+                const start = routedPointAtRatio(routePoints, heatShrink.startRatio);
+                const end = routedPointAtRatio(routePoints, heatShrink.endRatio);
+                const center = routedPointAtRatio(routePoints, (heatShrink.startRatio + heatShrink.endRatio) / 2);
+                const tubePath = routedSlicePath(routePoints, heatShrink.startRatio, heatShrink.endRatio);
+                const labelPath = end.x < start.x
+                  ? routedSlicePath([...routePoints].reverse(), 1 - heatShrink.endRatio, 1 - heatShrink.startRatio)
+                  : tubePath;
+                return <g key={heatShrink.id} className={`hd2-heat-shrink${heatShrinkSelected ? " is-selected" : ""}`}>
+                  <path className="hd2-heat-shrink-hit" d={tubePath} aria-label={`${heatShrink.reference} 수축튜브`} onPointerDown={(event) => beginHeatShrinkDrag(event, heatShrink, "move")} />
+                  <path className="hd2-heat-shrink-body" d={tubePath} style={{ stroke: heatShrink.color, strokeWidth: jacketWidth + 7 }} />
+                  <path className="hd2-heat-shrink-highlight" d={tubePath} style={{ strokeWidth: Math.max(2, jacketWidth * 0.22) }} />
+                  <HeatShrinkPathText
+                    heatShrink={heatShrink}
+                    path={labelPath}
+                    center={center}
+                    onSelect={() => onSelectHeatShrink(heatShrink.id)}
+                    onCommit={(text) => onUpdateHeatShrink(heatShrink.id, { text })}
+                  />
+                  {heatShrinkSelected && <>
+                    <circle className="hd2-heat-shrink-handle" cx={start.x} cy={start.y} r="7" aria-label={`${heatShrink.reference} 시작 핸들`} onPointerDown={(event) => beginHeatShrinkDrag(event, heatShrink, "start")} />
+                    <circle className="hd2-heat-shrink-handle" cx={end.x} cy={end.y} r="7" aria-label={`${heatShrink.reference} 끝 핸들`} onPointerDown={(event) => beginHeatShrinkDrag(event, heatShrink, "end")} />
+                  </>}
+                </g>;
+              })}
               <g
                 className={`hd2-cable-label${selected ? " is-selected" : ""}`}
                 transform={`translate(${handlePoint.x + labelOffset.x} ${handlePoint.y + labelOffset.y})`}
@@ -669,8 +843,10 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
         {visibleHarness.components.map((connector) => {
           const placement = visibleHarness.drawing.componentPlacements[connector.id];
           const selected = selection.componentIds.includes(connector.id);
-          const height = connectorHeight(connector);
-          const size = connectorSize(connector);
+          const baseHeight = connectorHeight(connector);
+          const baseSize = connectorSize(connector);
+          const size = connectorSize(connector, placement);
+          const displayScale = placement.displayScale ?? 1;
           const referenceOffset = connectorLabelOffset(connector, placement, "referenceLabel");
           const nameOffset = connectorLabelOffset(connector, placement, "nameLabel");
           const pinMapRows = connectorPinMapRows(visibleHarness, connector.id);
@@ -686,13 +862,13 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             onPointerDown={(event) => beginComponentDrag(event, connector.id)}
             data-testid={`connector-${connector.reference}`}
           >
-            <g transform={placement.rotation ? `rotate(${placement.rotation} ${size.width / 2} ${size.height / 2})` : undefined} data-testid={`connector-geometry-${connector.reference}`}>
+            <g transform={`${placement.rotation ? `rotate(${placement.rotation} ${size.width / 2} ${size.height / 2}) ` : ""}scale(${displayScale})`} data-testid={`connector-geometry-${connector.reference}`}>
             {connector.drawing ? <>
-              <rect className={`hd2-part-symbol-hit${selected ? " is-selected" : ""}`} width={size.width} height={size.height} />
-              <g className="hd2-part-symbol" transform={placement.pinSide === "left" ? `translate(${size.width} 0) scale(-1 1)` : undefined}>
-                <svg width={size.width} height={size.height} viewBox={`0 0 ${connector.drawing.widthMm} ${connector.drawing.heightMm}`} preserveAspectRatio="none" overflow="hidden">
+              <rect className={`hd2-part-symbol-hit${selected ? " is-selected" : ""}`} width={baseSize.width} height={baseSize.height} />
+              <g className="hd2-part-symbol" transform={placement.pinSide === "left" ? `translate(${baseSize.width} 0) scale(-1 1)` : undefined}>
+                <svg width={baseSize.width} height={baseSize.height} viewBox={`0 0 ${connector.drawing.widthMm} ${connector.drawing.heightMm}`} preserveAspectRatio="none" overflow="hidden">
                   {connector.drawing.imageDataUrl && <image href={connector.drawing.imageDataUrl} width={connector.drawing.widthMm} height={connector.drawing.heightMm} preserveAspectRatio="none" />}
-                  {connector.drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} vectorEffect="non-scaling-stroke" style={{ stroke: "#173f59", strokeWidth: 1.15 * (connector.drawing!.outlineStrength ?? 1) }} />)}
+                  {connector.drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} vectorEffect="non-scaling-stroke" style={{ stroke: "#173f59", strokeWidth: partDrawingStrokeWidth(connector.drawing!.outlineStrength) }} />)}
                 </svg>
               </g>
               {connector.pins.map((pin) => {
@@ -709,7 +885,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
                 </g>;
               })}
             </> : <>
-            <rect className="hd2-connector-body" width={CONNECTOR_WIDTH} height={height} rx="5" />
+            <rect className="hd2-connector-body" width={CONNECTOR_WIDTH} height={baseHeight} rx="5" />
             <rect className="hd2-connector-header" width={CONNECTOR_WIDTH} height={CONNECTOR_HEADER_HEIGHT} rx="5" />
             <path d={`M 0 ${CONNECTOR_HEADER_HEIGHT} H ${CONNECTOR_WIDTH}`} />
             <text className="hd2-pin-count" x={CONNECTOR_WIDTH - 11} y="18" textAnchor="end">{connector.pins.length}P</text>
@@ -740,6 +916,18 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             })}
             </>}
             </g>
+            {selected && selection.componentIds.length === 1 && <>
+              <rect className="hd2-component-scale-selection" x={bounds.x - placement.position.x - 4} y={bounds.y - placement.position.y - 4} width={bounds.width + 8} height={bounds.height + 8} />
+              <g
+                className="hd2-component-scale-control"
+                transform={`translate(${bounds.x - placement.position.x + bounds.width} ${bounds.y - placement.position.y + bounds.height})`}
+                aria-label={`${connector.reference} 크기 조절`}
+                onPointerDown={(event) => beginComponentScaleDrag(event, connector, placement)}
+              >
+                <rect className="hd2-component-scale-hit" x="-14" y="-14" width="28" height="28" />
+                <rect className="hd2-component-scale-handle" x="-6" y="-6" width="12" height="12" rx="2" />
+              </g>
+            </>}
             <g
               className={`hd2-connector-label${selectedLabel?.componentId === connector.id && selectedLabel.label === "referenceLabel" ? " is-selected" : ""}`}
               aria-label={`${connector.reference} 참조 라벨`}
@@ -780,6 +968,29 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             </g>}
           </g>;
         })}
+        <g className="hd2-cable-breakout-controls">
+          {visibleHarness.cableRuns.filter((cableRun) => selection.cableRunIds.includes(cableRun.id)).map((cableRun) => {
+            const geometry = cableRunGeometry(visibleHarness, cableRun.id);
+            return <g key={cableRun.id}>
+              <circle
+                className="hd2-cable-breakout-handle"
+                cx={geometry.fromJunction.x}
+                cy={geometry.fromJunction.y}
+                r="7"
+                aria-label={`${cableRun.reference} 시작 탈피 길이 핸들`}
+                onPointerDown={(event) => beginCableRunBreakoutDrag(event, cableRun.id, "from", geometry.fromJunction)}
+              />
+              <circle
+                className="hd2-cable-breakout-handle"
+                cx={geometry.toJunction.x}
+                cy={geometry.toJunction.y}
+                r="7"
+                aria-label={`${cableRun.reference} 끝 탈피 길이 핸들`}
+                onPointerDown={(event) => beginCableRunBreakoutDrag(event, cableRun.id, "to", geometry.toJunction)}
+              />
+            </g>;
+          })}
+        </g>
         {(visibleHarness.drawing.annotations ?? []).map((savedAnnotation) => {
           const annotation = previewAnnotation?.id === savedAnnotation.id ? previewAnnotation : savedAnnotation;
           const selected = selectedAnnotationId === annotation.id;
@@ -798,6 +1009,59 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       <span>상단의 커넥터 추가 버튼으로 시작하세요.</span>
     </div>}
   </div>;
+}
+
+function HeatShrinkPathText({ heatShrink, path, center, onSelect, onCommit }: {
+  heatShrink: CableHeatShrink2D;
+  path: string;
+  center: Point2D;
+  onSelect: () => void;
+  onCommit: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(heatShrink.text || heatShrink.reference);
+  const cancelCommitRef = useRef(false);
+  const pathId = `heat-shrink-text-${heatShrink.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  useEffect(() => setDraft(heatShrink.text || heatShrink.reference), [heatShrink.reference, heatShrink.text]);
+  const commit = () => {
+    if (!cancelCommitRef.current) {
+      const text = draft.trim();
+      if (text && text !== heatShrink.text) onCommit(text);
+    }
+    cancelCommitRef.current = false;
+    setEditing(false);
+  };
+
+  return <>
+    <defs><path id={pathId} d={path} /></defs>
+    {!editing && <text
+      className="hd2-heat-shrink-label"
+      dy="0.34em"
+      style={{ fill: heatShrink.textColor || "#ffffff" }}
+      aria-label={`${heatShrink.reference} 텍스트`}
+      onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}
+      onDoubleClick={(event) => { event.stopPropagation(); onSelect(); setEditing(true); }}
+    ><textPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">{heatShrink.text || heatShrink.reference}</textPath></text>}
+    {editing && <foreignObject x={center.x - 65} y={center.y - 12} width="130" height="24" className="hd2-heat-shrink-input-wrap">
+      <input
+        className="hd2-heat-shrink-input"
+        aria-label={`${heatShrink.reference} 텍스트 편집`}
+        value={draft}
+        autoFocus
+        onPointerDown={(event) => event.stopPropagation()}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            cancelCommitRef.current = true;
+            setDraft(heatShrink.text || heatShrink.reference);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </foreignObject>}
+  </>;
 }
 
 function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
@@ -841,7 +1105,7 @@ function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
 function connectorLabelOffset(connector: Connector2D, placement: ComponentPlacement2D, label: ConnectorLabelKind): Point2D {
   const saved = placement[label]?.offset;
   if (saved) return saved;
-  const size = connectorSize(connector);
+  const size = connectorSize(connector, placement);
   return label === "referenceLabel"
     ? { x: size.width / 2, y: -9 }
     : { x: size.width / 2, y: size.height + 14 };

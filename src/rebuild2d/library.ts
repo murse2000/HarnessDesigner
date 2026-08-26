@@ -1,4 +1,5 @@
 import type { ConnectorDraft, PartDrawing2D, PartSource2D, PinAnchor2D } from "./model";
+import { preferStepShadedDrawing } from "./stepSymbol";
 
 export type LibraryPin2D = {
   number: string;
@@ -77,16 +78,18 @@ export function partSource(part: LibraryPart2D, library: LibrarySummary2D): Part
 }
 
 export function libraryPartToConnectorDraft(part: LibraryPart2D, library: LibrarySummary2D): ConnectorDraft {
+  const preferredDrawing = part.drawing ? preferStepShadedDrawing(part.drawing) : undefined;
   return {
     name: part.name,
     partNumber: part.partNumber,
     manufacturer: part.manufacturer,
     pinCount: part.pins.length,
     pins: part.pins.map((pin) => ({ ...pin })),
-    drawing: part.drawing ? {
-      ...part.drawing,
-      paths: part.drawing.paths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })),
-      unsupportedEntities: part.drawing.unsupportedEntities.map((item) => ({ ...item })),
+    drawing: preferredDrawing ? {
+      ...preferredDrawing,
+      editorState: undefined,
+      paths: preferredDrawing.paths.map((path) => ({ ...path, points: path.points.map((point) => ({ ...point })) })),
+      unsupportedEntities: preferredDrawing.unsupportedEntities.map((item) => ({ ...item })),
     } : undefined,
     source: partSource(part, library),
   };

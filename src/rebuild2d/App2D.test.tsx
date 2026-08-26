@@ -18,6 +18,7 @@ describe("새 2D 편집 화면", () => {
 
     expect(screen.getByRole("button", { name: "PDF" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "인쇄" })).toBeEnabled();
+    expect(screen.queryByText("새 2D 엔진")).not.toBeInTheDocument();
   });
 
   it("환경설정을 저장하고 캔버스에 즉시 반영한다", () => {
@@ -110,6 +111,20 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByRole("button", { name: "HNS-002 하네스 도면" })).toHaveClass("is-selected");
     expect(screen.getByText("HNS-002 빈 하네스 도면을 생성했습니다.")).toBeInTheDocument();
     expect(screen.getByText("빈 2D 도면")).toBeInTheDocument();
+  });
+
+  it("선택한 하네스 도면을 확인 후 삭제하고 인접 도면으로 전환한다", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App2D />);
+    expect(screen.getByRole("button", { name: "선택한 하네스 도면 삭제" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
+    fireEvent.click(screen.getByRole("button", { name: "선택한 하네스 도면 삭제" }));
+
+    expect(screen.queryByRole("button", { name: "HNS-002 하네스 도면" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "HNS-001 하네스 도면" })).toHaveClass("is-selected");
+    expect(screen.getByText("HNS-002 하네스 도면을 삭제했습니다.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "선택한 하네스 도면 삭제" })).toBeDisabled();
   });
 
   it("좌측 하네스 행을 드래그해 도면 순서를 변경한다", () => {
@@ -242,6 +257,20 @@ describe("새 2D 편집 화면", () => {
     const rotationInput = screen.getByLabelText("참조 라벨 각도");
     fireEvent.keyDown(rotationInput, { key: "r" });
     expect(screen.getByTestId("connector-geometry-J1").getAttribute("transform")).toContain("rotate(180 110 55.5)");
+  });
+
+  it("선택한 커넥터의 크기 핸들을 끌어 표시 배율을 조정한다", () => {
+    render(<App2D />);
+    addConnector("배율 확인", 2);
+    const canvas = screen.getByLabelText("하네스 2D 도면");
+    const handle = screen.getByLabelText("J1 크기 조절");
+
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 21, clientX: 360, clientY: 251 });
+    fireEvent.pointerMove(canvas, { pointerId: 21, clientX: 470, clientY: 306.5 });
+    fireEvent.pointerUp(canvas, { pointerId: 21, clientX: 470, clientY: 306.5 });
+
+    expect(screen.getByTestId("connector-geometry-J1").getAttribute("transform")).toContain("scale(2)");
+    expect(screen.getByText("표시 배율 · 200%")).toBeInTheDocument();
   });
 
   it("마우스 휠 확대 배율을 작은 단계로 조정한다", () => {

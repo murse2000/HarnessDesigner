@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCableRun, addConnector, addDrawingAnnotation, addHarness, addWireRun, connectPins, copyHarness, copyHarnessDrawing, createEmptyProject, deleteDrawingAnnotation, deleteItems, moveComponent, moveItems, pasteHarness, pasteHarnessDrawing, reorderHarness, setCableRunLabelOffset, setCableRunRoute, setComponentLabelPlacement, setComponentPinMapOffset, setComponentRotation, setConnectionRoute, updateDrawingAnnotation, updateDrawingTitleBlock } from "./model";
+import { addCableHeatShrink, addCableRun, addConnector, addDrawingAnnotation, addHarness, addWireRun, connectPins, copyHarness, copyHarnessDrawing, createEmptyProject, deleteCableHeatShrink, deleteDrawingAnnotation, deleteHarness, deleteItems, moveComponent, moveItems, pasteHarness, pasteHarnessDrawing, reorderHarness, setCableRunBreakout, setCableRunLabelOffset, setCableRunRoute, setComponentDisplayScale, setComponentLabelPlacement, setComponentPinMapOffset, setComponentRotation, setConnectionRoute, updateCableHeatShrink, updateDrawingAnnotation, updateDrawingTitleBlock } from "./model";
 
 describe("새 2D 프로젝트 모델", () => {
   it("샘플 부품 없이 빈 하네스로 시작한다", () => {
@@ -21,6 +21,15 @@ describe("새 2D 프로젝트 모델", () => {
     expect(second.project.harnesses.map((harness) => harness.partNumber)).toEqual(["HNS-001", "HNS-002", "HNS-003"]);
     expect(second.project.harnesses[2]).toMatchObject({ id: second.harnessId, name: "새 하네스", revision: "A", components: [], connections: [], cableRuns: [] });
     expect(second.project.harnesses[2].drawing.titleBlock?.drawingTitle).toBe("HARNESS ASSEMBLY DRAWING");
+  });
+
+  it("선택한 하네스를 삭제하되 마지막 하네스는 유지한다", () => {
+    const project = createEmptyProject();
+    const added = addHarness(project);
+    const deleted = deleteHarness(added.project, added.harnessId);
+
+    expect(deleted.harnesses.map((harness) => harness.partNumber)).toEqual(["HNS-001"]);
+    expect(deleteHarness(deleted, deleted.harnesses[0].id)).toBe(deleted);
   });
 
   it("하네스 도면 순서를 앞뒤로 변경하고 직렬화 후에도 유지한다", () => {
@@ -148,15 +157,18 @@ describe("새 2D 프로젝트 모델", () => {
     expect(project.harnesses[0].drawing.componentPlacements).toEqual({});
   });
 
-  it("커넥터 회전값을 도면 배치에 저장하고 복사본에도 유지한다", () => {
+  it("커넥터 회전과 표시 배율을 도면 배치에 저장하고 복사본에도 유지한다", () => {
     const project = createEmptyProject();
     const harnessId = project.harnesses[0].id;
     const added = addConnector(project, harnessId, { name: "A", partNumber: "A-2", manufacturer: "Test", pinCount: 2 }, { x: 100, y: 100 });
     const rotated = setComponentRotation(added.project, harnessId, added.componentId, 90);
-    const harness = rotated.harnesses[0];
+    const resized = setComponentDisplayScale(rotated, harnessId, added.componentId, 1.75);
+    const harness = JSON.parse(JSON.stringify(resized)).harnesses[0];
 
     expect(harness.drawing.componentPlacements[added.componentId].rotation).toBe(90);
+    expect(harness.drawing.componentPlacements[added.componentId].displayScale).toBe(1.75);
     expect(copyHarnessDrawing(harness, new Set([added.componentId]), new Set(), new Set()).components[0].placement.rotation).toBe(90);
+    expect(copyHarnessDrawing(harness, new Set([added.componentId]), new Set(), new Set()).components[0].placement.displayScale).toBe(1.75);
   });
 
   it("커넥터 라벨 위치와 각도를 도면 배치에 저장하고 복사본에도 유지한다", () => {
@@ -223,13 +235,16 @@ describe("새 2D 프로젝트 모델", () => {
       mappings: [{ coreIndex: 0, from: fixture.from, to: fixture.to }],
     });
     project = setCableRunRoute(cable.project, fixture.harnessId, cable.cableRunId, { x: 430, y: 320 });
+    project = setCableRunBreakout(project, fixture.harnessId, cable.cableRunId, "from", { x: 300, y: 180 });
     project = setCableRunLabelOffset(project, fixture.harnessId, cable.cableRunId, { x: 35, y: -28 });
     expect(project.harnesses[0].drawing.cableRunRoutes?.[cable.cableRunId].point).toEqual({ x: 430, y: 320 });
     expect(project.harnesses[0].drawing.cableRunLabelOffsets?.[cable.cableRunId]).toEqual({ x: 35, y: -28 });
+    expect(project.harnesses[0].drawing.cableRunBreakouts?.[cable.cableRunId].from).toEqual({ x: 300, y: 180 });
 
     project = deleteItems(project, fixture.harnessId, new Set(), new Set([wire.connectionId]), new Set([cable.cableRunId]));
     expect(project.harnesses[0].drawing.connectionRoutes).toEqual({});
     expect(project.harnesses[0].drawing.cableRunRoutes).toEqual({});
+    expect(project.harnesses[0].drawing.cableRunBreakouts).toEqual({});
     expect(project.harnesses[0].drawing.cableRunLabelOffsets).toEqual({});
   });
 
@@ -253,6 +268,7 @@ describe("새 2D 프로젝트 모델", () => {
       mappings: [{ coreIndex: 0, from: fixture.from, to: fixture.to }],
     });
     project = setCableRunRoute(cable.project, fixture.harnessId, cable.cableRunId, { x: 430, y: 320 });
+    project = setCableRunBreakout(project, fixture.harnessId, cable.cableRunId, "from", { x: 300, y: 180 });
 
     project = moveItems(
       project,
@@ -267,6 +283,7 @@ describe("새 2D 프로젝트 모델", () => {
     expect(project.harnesses[0].drawing.componentPlacements[fixture.to.componentId].position).toEqual({ x: 780, y: 140 });
     expect(project.harnesses[0].drawing.connectionRoutes?.[wire.connectionId].point).toEqual({ x: 500, y: 300 });
     expect(project.harnesses[0].drawing.cableRunRoutes?.[cable.cableRunId].point).toEqual({ x: 510, y: 360 });
+    expect(project.harnesses[0].drawing.cableRunBreakouts?.[cable.cableRunId].from).toEqual({ x: 380, y: 220 });
   });
 
   it("선택한 하네스 도면의 부품·전선·케이블·경로를 새 ID로 함께 복제한다", () => {
@@ -294,6 +311,7 @@ describe("새 2D 프로젝트 모델", () => {
       }],
     });
     project = setCableRunRoute(cable.project, fixture.harnessId, cable.cableRunId, { x: 430, y: 320 });
+    project = setCableRunBreakout(project, fixture.harnessId, cable.cableRunId, "from", { x: 300, y: 180 });
     const harness = project.harnesses[0];
     const copied = copyHarnessDrawing(
       harness,
@@ -310,6 +328,7 @@ describe("새 2D 프로젝트 모델", () => {
     expect(pastedHarness.drawing.componentPlacements[result.componentIds[0]].position).toEqual({ x: 120, y: 120 });
     expect(pastedHarness.drawing.connectionRoutes?.[result.connectionIds[0]].point).toEqual({ x: 440, y: 280 });
     expect(pastedHarness.drawing.cableRunRoutes?.[result.cableRunIds[0]].point).toEqual({ x: 450, y: 340 });
+    expect(pastedHarness.drawing.cableRunBreakouts?.[result.cableRunIds[0]].from).toEqual({ x: 320, y: 200 });
     expect(result.connectionIds.every((id) => !harness.connections.some((connection) => connection.id === id))).toBe(true);
     expect(pastedHarness.connections.slice(2).every((connection) => result.componentIds.includes(connection.from.componentId) && result.componentIds.includes(connection.to.componentId))).toBe(true);
   });
@@ -335,6 +354,26 @@ describe("새 2D 프로젝트 모델", () => {
     expect(pasted.connections.every((connection) => !source.connections.some((original) => original.id === connection.id))).toBe(true);
     expect(pasted.connections[0].from.componentId).toBe(pasted.components[0].id);
     expect(pasted.connections[0].to.componentId).toBe(pasted.components[1].id);
+  });
+
+  it("선택한 멀티코어 케이블에 수축튜브를 추가하고 편집·삭제한다", () => {
+    const fixture = twoConnectors();
+    const cable = addCableRun(fixture.project, fixture.harnessId, {
+      part: {
+        name: "2C", partNumber: "CABLE-2", manufacturer: "Test", outerDiameterMm: 5,
+        cores: [{ name: "CORE 1", color: "BK", gauge: "22 AWG" }],
+        source: { libraryId: "L1", libraryRevision: "1", partId: "C1" },
+      },
+      lengthMm: 300,
+      mappings: [{ coreIndex: 0, from: fixture.from, to: fixture.to }],
+    });
+    const added = addCableHeatShrink(cable.project, fixture.harnessId, cable.cableRunId);
+    const heatShrink = added.project.harnesses[0].drawing.cableHeatShrinks?.[0];
+
+    expect(heatShrink).toMatchObject({ reference: "HS-001", text: "HS-001", cableRunId: cable.cableRunId, startRatio: 0.4, endRatio: 0.6, textColor: "#ffffff" });
+    const updated = updateCableHeatShrink(added.project, fixture.harnessId, added.heatShrinkId, { text: "SENSOR", startRatio: 0.2, endRatio: 0.5, color: "#334455", textColor: "#ffee00" });
+    expect(updated.harnesses[0].drawing.cableHeatShrinks?.[0]).toMatchObject({ text: "SENSOR", startRatio: 0.2, endRatio: 0.5, color: "#334455", textColor: "#ffee00" });
+    expect(deleteCableHeatShrink(updated, fixture.harnessId, added.heatShrinkId).harnesses[0].drawing.cableHeatShrinks).toEqual([]);
   });
 });
 

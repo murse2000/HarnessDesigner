@@ -71,7 +71,7 @@ describe("라이브러리 커넥터 선택", () => {
         pins: [{ number: "1", name: "PIN" }],
         cores: [],
         drawing: {
-          sourceName: "drawing.pdf · 1페이지",
+          sourceName: "drawing.png",
           widthMm: 20,
           heightMm: 10,
           paths: [],
@@ -98,6 +98,6 @@ describe("라이브러리 커넥터 선택", () => {
     expect(screen.getByLabelText("EMPTY-04 2D 도면 없음")).toHaveTextContent("도면 없음");
     fireEvent.click(screen.getByText("DRAWING-04"));
     expect(screen.getByRole("button", { name: "2D 도면 · 등록됨" })).toBeInTheDocument();
-    expect(screen.getByText("drawing.pdf · 1페이지")).toBeInTheDocument();
+    expect(screen.getByText("drawing.png")).toBeInTheDocument();
   });
 });

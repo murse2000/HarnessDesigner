@@ -4,14 +4,21 @@ import { PartSymbolEditor, stepRotationFromDrag } from "./PartSymbolEditor";
 import type { LibraryPartDraft2D } from "./library";
 
 const pdfMocks = vi.hoisted(() => ({
-  parsePdfDrawing: vi.fn(),
   parseImageDrawing: vi.fn(),
+}));
+const stepMocks = vi.hoisted(() => ({
+  importStepAsset: vi.fn(),
+  projectStepDrawing: vi.fn(),
 }));
 
 vi.mock("./pdfSymbol", () => ({
   extractRasterPartDrawing: vi.fn(),
-  parsePdfDrawing: pdfMocks.parsePdfDrawing,
   parseImageDrawing: pdfMocks.parseImageDrawing,
+}));
+vi.mock("../three/stepImport", () => ({ importStepAsset: stepMocks.importStepAsset }));
+vi.mock("./stepSymbol", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./stepSymbol")>(),
+  projectStepDrawing: stepMocks.projectStepDrawing,
 }));
 
 const draft: LibraryPartDraft2D = {
@@ -25,41 +32,28 @@ const draft: LibraryPartDraft2D = {
   cores: [],
 };
 
-function raster(sourceName: string, sourceType: "pdf" | "image", pageNumber = 1, pageCount = 1) {
+function raster(sourceName: string) {
   return {
     sourceName,
-    sourceType,
+    sourceType: "image" as const,
     bounds: { x: 0, y: 0, width: 100, height: 80 },
     paths: [],
     unsupported: [],
     imageDataUrl: "data:image/png;base64,AA==",
-    pageNumber,
-    pageCount,
+    pageNumber: 1,
+    pageCount: 1,
   };
 }
 
 describe("부품 심벌 도면 입력", () => {
   beforeEach(() => {
-    pdfMocks.parsePdfDrawing.mockReset();
     pdfMocks.parseImageDrawing.mockReset();
-  });
-
-  it("여러 장의 PDF에서 원하는 페이지로 이동한다", async () => {
-    pdfMocks.parsePdfDrawing.mockImplementation(async (_data: Uint8Array, name: string, page = 1) => raster(name, "pdf", page, 3));
-    const { container } = render(<PartSymbolEditor draft={draft} onApply={() => {}} onClose={() => {}} />);
-    const file = new File([new Uint8Array([1, 2, 3])], "pages.pdf", { type: "application/pdf" });
-    Object.defineProperty(file, "arrayBuffer", { value: async () => new Uint8Array([1, 2, 3]).buffer });
-
-    fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [file] } });
-    expect(await screen.findByLabelText("PDF 페이지")).toHaveValue("1");
-    fireEvent.click(screen.getByRole("button", { name: "다음 PDF 페이지" }));
-
-    await waitFor(() => expect(screen.getByLabelText("PDF 페이지")).toHaveValue("2"));
-    expect(pdfMocks.parsePdfDrawing).toHaveBeenLastCalledWith(expect.any(Uint8Array), "pages.pdf", 2);
+    stepMocks.importStepAsset.mockReset();
+    stepMocks.projectStepDrawing.mockReset();
   });
 
   it("PNG 파일과 클립보드 이미지를 도면으로 불러온다", async () => {
-    pdfMocks.parseImageDrawing.mockImplementation(async (_file: Blob, name: string) => raster(name, "image"));
+    pdfMocks.parseImageDrawing.mockImplementation(async (_file: Blob, name: string) => raster(name));
     const { container } = render(<PartSymbolEditor draft={draft} onApply={() => {}} onClose={() => {}} />);
     const image = new File([new Uint8Array([1])], "connector.png", { type: "image/png" });
 
@@ -74,6 +68,31 @@ describe("부품 심벌 도면 입력", () => {
   it("STEP 마우스 드래그를 X/Y 또는 Z 회전값으로 변환한다", () => {
     expect(stepRotationFromDrag({ x: 0, y: 0, z: 0 }, 100, -50, false)).toEqual({ x: -20, y: 40, z: 0 });
     expect(stepRotationFromDrag({ x: 10, y: 20, z: 30 }, 50, 80, true)).toEqual({ x: 10, y: 20, z: 50 });
+  });
+
+  it("STEP 회전 중 사용자가 확대한 뷰포인트를 유지한다", async () => {
+    stepMocks.importStepAsset.mockResolvedValue({ id: "step", name: "part", sourceFormat: "step", sourceName: "part.step", sourceDataBase64: "", meshes: [] });
+    stepMocks.projectStepDrawing.mockImplementation((_asset, rotation: { y: number }) => ({
+      sourceName: "part.step · STEP 투영",
+      bounds: rotation.y === 0 ? { x: 0, y: 0, width: 100, height: 80 } : { x: -40, y: -30, width: 180, height: 140 },
+      paths: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 80 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+      surfaces: [],
+      unsupported: [],
+    }));
+    const { container } = render(<PartSymbolEditor draft={draft} onApply={() => {}} onClose={() => {}} />);
+    const file = new File([new Uint8Array([1])], "part.step");
+    Object.defineProperty(file, "arrayBuffer", { value: async () => new Uint8Array([1]).buffer });
+
+    fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [file] } });
+    await screen.findByText("part.step · STEP 투영 · 형상 1개");
+    const canvas = container.querySelector<SVGSVGElement>(".hd2-symbol-canvas > svg")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON: () => ({}) });
+    fireEvent.wheel(canvas, { deltaY: -100, clientX: 400, clientY: 300 });
+    const zoomedViewBox = canvas.getAttribute("viewBox");
+
+    fireEvent.change(screen.getByLabelText("STEP Y 회전"), { target: { value: "45" } });
+    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 0, y: 45, z: 0 }));
+    expect(canvas.getAttribute("viewBox")).toBe(zoomedViewBox);
   });
 
   it("등록된 벡터 도면을 수정할 때 윤곽선 강도를 표시하고 저장한다", async () => {
@@ -94,9 +113,91 @@ describe("부품 심벌 도면 입력", () => {
     const strength = screen.getByRole("slider", { name: "윤곽선 강도" });
     expect(strength).toHaveValue("1");
     fireEvent.change(strength, { target: { value: "2.5" } });
+    expect(document.querySelector<SVGGElement>(".hd2-symbol-source")?.style.strokeWidth).toBe("2.875");
     fireEvent.click(screen.getByRole("button", { name: "심벌 적용" }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalled());
     expect(onApply.mock.calls[0][0].drawing.outlineStrength).toBe(2.5);
+  });
+
+  it("저장된 편집 원본과 추출 영역, 배율, 핀 배열을 그대로 복원한다", async () => {
+    const onApply = vi.fn();
+    stepMocks.projectStepDrawing.mockImplementation(() => ({
+      sourceName: "connector.step · STEP 투영",
+      bounds: { x: 0, y: 0, width: 80, height: 60 },
+      paths: [{ points: [{ x: 10, y: 20 }, { x: 50, y: 40 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+      surfaces: [],
+      unsupported: [],
+    }));
+    const existingDraft: LibraryPartDraft2D = {
+      ...draft,
+      pins: [{ number: "1", name: "VCC", anchor: { xMm: 20, yMm: 5, directionX: 1, directionY: 0 } }],
+      drawing: {
+        sourceName: "connector.step · STEP 투영",
+        widthMm: 20,
+        heightMm: 10,
+        paths: [{ points: [{ x: 0, y: 0 }, { x: 20, y: 10 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+        outlineStrength: 2.2,
+        unsupportedEntities: [],
+        editorState: {
+          source: {
+            sourceName: "connector.step · STEP 투영",
+            bounds: { x: 0, y: 0, width: 80, height: 60 },
+            paths: [{ points: [{ x: 10, y: 20 }, { x: 50, y: 40 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+            unsupported: [],
+          },
+          selection: { x: 10, y: 20, width: 40, height: 20 },
+          viewBox: { x: -5, y: -10, width: 100, height: 80 },
+          pinPoints: [{ x: 50, y: 30 }],
+          stepRotation: { x: 15, y: 25, z: 35 },
+          stepAsset: { id: "step", name: "connector", sourceFormat: "step", sourceName: "connector.step", sourceDataBase64: "", meshes: [] },
+        },
+      },
+    };
+    const { container } = render(<PartSymbolEditor draft={existingDraft} onApply={onApply} onClose={() => {}} />);
+
+    const canvas = container.querySelector<SVGSVGElement>(".hd2-symbol-canvas > svg")!;
+    expect(canvas).toHaveAttribute("viewBox", "-5 -10 100 80");
+    expect(screen.getByText("40.000")).toBeInTheDocument();
+    expect(screen.getByText("배치됨")).toBeInTheDocument();
+    expect(screen.getByLabelText("STEP X 회전")).toHaveValue(15);
+    expect(screen.getByLabelText("STEP Y 회전")).toHaveValue(25);
+    expect(screen.getByLabelText("STEP Z 회전")).toHaveValue(35);
+
+    Object.defineProperty(canvas, "setPointerCapture", { value: vi.fn() });
+    Object.defineProperty(canvas, "hasPointerCapture", { value: vi.fn(() => false) });
+    fireEvent.click(screen.getByRole("button", { name: "마우스 회전" }));
+    fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 120, clientY: 110 });
+    expect(canvas).toHaveAttribute("viewBox", "-5 -10 100 80");
+    expect(container.querySelector(".hd2-symbol-selection")).toBeInTheDocument();
+    expect(container.querySelector(".hd2-symbol-pin")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "심벌 적용" }));
+    await waitFor(() => expect(onApply).toHaveBeenCalled());
+    expect(onApply.mock.calls[0][0].drawing.editorState.selection).toEqual({ x: 10, y: 20, width: 40, height: 20 });
+    expect(onApply.mock.calls[0][0].pins[0].anchor).toEqual({ xMm: 40, yMm: 10, directionX: 1, directionY: 0 });
+  });
+
+  it("기존 도면의 미배치 핀은 그대로 두고 윤곽선만 수정할 수 있다", async () => {
+    const onApply = vi.fn();
+    const existingDraft: LibraryPartDraft2D = {
+      ...draft,
+      drawing: {
+        sourceName: "legacy.dxf",
+        widthMm: 20,
+        heightMm: 10,
+        paths: [{ points: [{ x: 0, y: 0 }, { x: 20, y: 10 }], closed: false, layer: "OUTLINE", sourceType: "LINE" }],
+        unsupportedEntities: [],
+      },
+    };
+    render(<PartSymbolEditor draft={existingDraft} onApply={onApply} onClose={() => {}} />);
+
+    fireEvent.change(screen.getByRole("slider", { name: "윤곽선 강도" }), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "심벌 적용" }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalled());
+    expect(onApply.mock.calls[0][0].pins[0].anchor).toBeUndefined();
+    expect(onApply.mock.calls[0][0].drawing.outlineStrength).toBe(3);
   });
 });

@@ -8,10 +8,12 @@ import { WireCableRunDialog } from "./WireCableDialogs";
 import { SettingsDialog } from "./SettingsDialog";
 import { AutoUpdater } from "./AutoUpdater";
 import { createDrawingPdfBytes, preparePaperDrawing, printPaperDrawing } from "./drawingOutput";
+import { prepareProjectPaperDrawings } from "./projectDrawingOutput";
 import type { DefaultLibraryInstallation2D, LibrarySummary2D } from "./library";
 import { displayLength, loadSettings2D, normalizeSettings2D, saveSettings2D, storedLength, type LengthUnit2D, type Settings2D } from "./settings";
 import {
   addConnector,
+  addCableHeatShrink,
   addCableRun,
   addDrawingAnnotation,
   addHarness,
@@ -22,14 +24,18 @@ import {
   copyHarnessDrawing,
   createEmptyProject,
   deleteDrawingAnnotation,
+  deleteCableHeatShrink,
+  deleteHarness,
   deleteItems,
   moveItems,
   pasteHarness,
   pasteHarnessDrawing,
   reorderHarness,
+  setCableRunBreakout,
   setCableRunRoute,
   setCableRunLabelOffset,
   setComponentLabelPlacement,
+  setComponentDisplayScale,
   setComponentPinMapOffset,
   setComponentPinSide,
   setComponentRotation,
@@ -37,6 +43,7 @@ import {
   updateComponent,
   updateConnection,
   updateCableRun,
+  updateCableHeatShrink,
   updateDrawingAnnotation,
   updateDrawingTitleBlock,
   updateHarnessMetadata,
@@ -44,6 +51,7 @@ import {
   updateProjectMetadata,
   type ConnectorDraft,
   type CableRunDraft2D,
+  type CableHeatShrink2D,
   type ComponentRotation2D,
   type CopiedHarness2D,
   type CopiedHarnessDrawing2D,
@@ -55,7 +63,7 @@ import {
   type WireRunDraft2D,
 } from "./model";
 
-const APP_VERSION = "0.3.37";
+const APP_VERSION = "0.3.47";
 
 type HistoryState = {
   past: Project2D[];
@@ -74,6 +82,7 @@ export default function App2D() {
   const [selection, setSelection] = useState<CanvasSelection>(emptySelection);
   const [selectedLabel, setSelectedLabel] = useState<SelectedConnectorLabel | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [selectedHeatShrinkId, setSelectedHeatShrinkId] = useState<string | null>(null);
   const [connectorDialogOpen, setConnectorDialogOpen] = useState(false);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -93,6 +102,18 @@ export default function App2D() {
   const project = history.present;
   const harness = project.harnesses.find((item) => item.id === activeHarnessId) ?? project.harnesses[0];
   const dirty = JSON.stringify(project) !== savedDocument;
+
+  useEffect(() => {
+    if (selection.componentIds.length + selection.connectionIds.length + selection.cableRunIds.length > 0 || selectedAnnotationId || selectedLabel || selectedHarnessId) {
+      setSelectedHeatShrinkId(null);
+    }
+  }, [selectedAnnotationId, selectedHarnessId, selectedLabel, selection]);
+
+  useEffect(() => {
+    if (selectedHeatShrinkId && !(harness.drawing.cableHeatShrinks ?? []).some((heatShrink) => heatShrink.id === selectedHeatShrinkId)) {
+      setSelectedHeatShrinkId(null);
+    }
+  }, [harness.drawing.cableHeatShrinks, selectedHeatShrinkId]);
 
   useEffect(() => {
     if (project.harnesses.some((item) => item.id === activeHarnessId)) return;
@@ -235,21 +256,16 @@ export default function App2D() {
   }, [filePath, project]);
 
   const exportPdf = useCallback(async () => {
-    const canvas = document.querySelector<SVGSVGElement>(".hd2-canvas");
-    if (!canvas) {
-      setMessage("출력할 2D 도면을 찾을 수 없습니다.");
-      return;
-    }
     const path = isTauri() ? await save({
-      defaultPath: `${harness.partNumber}.pdf`,
+      defaultPath: `${project.projectNumber}.pdf`,
       filters: [{ name: "PDF 도면", extensions: ["pdf"] }],
-    }) : `${harness.partNumber}.pdf`;
+    }) : `${project.projectNumber}.pdf`;
     if (!path) return;
 
     setOutputBusy(true);
-    setMessage(`${settings.drawingSheet} 용지 PDF를 생성하고 있습니다.`);
+    setMessage(`${settings.drawingSheet} 용지 PDF ${project.harnesses.length}페이지를 생성하고 있습니다.`);
     try {
-      const bytes = await createDrawingPdfBytes(preparePaperDrawing(canvas, settings.drawingSheet));
+      const bytes = await createDrawingPdfBytes(prepareProjectPaperDrawings(project, settings));
       if (isTauri()) {
         await backendInvoke("write_rebuilt_binary_file", { path, content: Array.from(bytes) });
       } else {
@@ -261,13 +277,13 @@ export default function App2D() {
         link.click();
         URL.revokeObjectURL(url);
       }
-      setMessage(`${settings.drawingSheet} 용지 PDF를 저장했습니다.`);
+      setMessage(`${settings.drawingSheet} 용지 PDF ${project.harnesses.length}페이지를 저장했습니다.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setOutputBusy(false);
     }
-  }, [harness.partNumber, settings.drawingSheet]);
+  }, [project, settings]);
 
   const printDrawing = useCallback(async () => {
     const canvas = document.querySelector<SVGSVGElement>(".hd2-canvas");
@@ -303,6 +319,12 @@ export default function App2D() {
   }, [dirty, filePath, project, settings.autosaveMinutes]);
 
   const removeSelection = useCallback(() => {
+    if (selectedHeatShrinkId) {
+      apply((current) => deleteCableHeatShrink(current, harness.id, selectedHeatShrinkId));
+      setSelectedHeatShrinkId(null);
+      setMessage("수축튜브를 삭제했습니다.");
+      return;
+    }
     if (selectedAnnotationId) {
       apply((current) => deleteDrawingAnnotation(current, harness.id, selectedAnnotationId));
       setSelectedAnnotationId(null);
@@ -313,7 +335,7 @@ export default function App2D() {
     apply((current) => deleteItems(current, harness.id, new Set(selection.componentIds), new Set(selection.connectionIds), new Set(selection.cableRunIds)));
     setSelection(emptySelection);
     setSelectedLabel(null);
-  }, [apply, harness.id, selectedAnnotationId, selection]);
+  }, [apply, harness.id, selectedAnnotationId, selectedHeatShrinkId, selection]);
 
   const copySelection = useCallback(() => {
     const selectedHarness = selectedHarnessId
@@ -426,6 +448,25 @@ export default function App2D() {
     setMessage(`${added.partNumber} 빈 하네스 도면을 생성했습니다.`);
   }, [commit, project]);
 
+  const removeHarness = useCallback((harnessId: string) => {
+    const index = project.harnesses.findIndex((item) => item.id === harnessId);
+    const removed = project.harnesses[index];
+    if (!removed || project.harnesses.length <= 1) return;
+    if (!window.confirm(`${removed.partNumber} 하네스 도면을 삭제하시겠습니까?`)) return;
+
+    const next = deleteHarness(project, harnessId);
+    const nextActiveId = activeHarnessId === harnessId
+      ? next.harnesses[Math.min(index, next.harnesses.length - 1)].id
+      : activeHarnessId;
+    commit(next);
+    setActiveHarnessId(nextActiveId);
+    setSelectedHarnessId(nextActiveId);
+    setSelection(emptySelection);
+    setSelectedLabel(null);
+    setSelectedAnnotationId(null);
+    setMessage(`${removed.partNumber} 하네스 도면을 삭제했습니다.`);
+  }, [activeHarnessId, commit, project]);
+
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       if (isEditingElement(event.target)) return;
@@ -486,12 +527,13 @@ export default function App2D() {
         rotateSelection();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
-        removeSelection();
+        if (selectedHarnessId) removeHarness(selectedHarnessId);
+        else removeSelection();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copySelection, harness, openProject, pasteSelection, redo, removeSelection, rotateSelection, saveProject, selectedLabel, selection.componentIds.length, startNewProject, undo]);
+  }, [copySelection, harness, openProject, pasteSelection, redo, removeHarness, removeSelection, rotateSelection, saveProject, selectedHarnessId, selectedLabel, selection.componentIds.length, startNewProject, undo]);
 
   const addNewConnector = (draft: ConnectorDraft) => {
     const count = harness.components.length;
@@ -521,6 +563,9 @@ export default function App2D() {
     : undefined;
   const selectedAnnotation = selectedAnnotationId
     ? harness.drawing.annotations?.find((annotation) => annotation.id === selectedAnnotationId)
+    : undefined;
+  const selectedHeatShrink = selectedHeatShrinkId
+    ? harness.drawing.cableHeatShrinks?.find((heatShrink) => heatShrink.id === selectedHeatShrinkId)
     : undefined;
   const coordinateDigits = settings.lengthUnit === "in" ? 3 : 1;
   const coordinate = (value: number) => displayLength(value, settings.lengthUnit).toFixed(coordinateDigits);
@@ -552,6 +597,15 @@ export default function App2D() {
       <button type="button" className="is-primary" onClick={() => setConnectorDialogOpen(true)}><Plus size={15} />커넥터</button>
       <button type="button" onClick={() => setRunDialogKind("wire")}><Plus size={15} />단선</button>
       <button type="button" onClick={() => setRunDialogKind("cable")}><Plus size={15} />멀티코어 케이블</button>
+      <button type="button" disabled={!selectedCableRun} onClick={() => {
+        if (!selectedCableRun) return;
+        const result = addCableHeatShrink(project, harness.id, selectedCableRun.id);
+        commit(result.project);
+        setSelection(emptySelection);
+        setSelectedAnnotationId(null);
+        setSelectedHeatShrinkId(result.heatShrinkId);
+        setMessage(`${selectedCableRun.reference}에 수축튜브를 추가했습니다.`);
+      }}><Cable size={15} />수축튜브</button>
       <span className="hd2-separator" />
       <button type="button" onClick={() => insertAnnotation("label")}><Tag size={15} />라벨</button>
       <button type="button" onClick={() => insertAnnotation("text")}><Type size={15} />텍스트</button>
@@ -572,7 +626,7 @@ export default function App2D() {
       />
       <button type="button" disabled={!selectedLabel && selection.componentIds.length === 0} onClick={rotateSelection} title="선택 90° 회전 (R)"><RotateCw size={15} />선택 90° 회전</button>
       <span className="hd2-help"><CircleHelp size={14} />좌측 하네스 선택 후 C·V 전체 도면 복제 · Cmd/Ctrl+A 캔버스 전체 선택 · Space+드래그 화면 이동</span>
-      <button type="button" disabled={!selectedAnnotationId && selection.componentIds.length + selection.connectionIds.length + selection.cableRunIds.length === 0} onClick={removeSelection}><Trash2 size={15} />선택 삭제</button>
+      <button type="button" disabled={!selectedHeatShrinkId && !selectedAnnotationId && selection.componentIds.length + selection.connectionIds.length + selection.cableRunIds.length === 0} onClick={removeSelection}><Trash2 size={15} />선택 삭제</button>
     </div>
 
     <section className="hd2-workspace">
@@ -583,6 +637,7 @@ export default function App2D() {
         selectedComponentIds={selection.componentIds}
         selectedCableRunIds={selection.cableRunIds}
         onAddHarness={createHarness}
+        onDeleteHarness={removeHarness}
         onReorderHarness={(sourceHarnessId, targetHarnessId, placement) => {
           const source = project.harnesses.find((item) => item.id === sourceHarnessId);
           const target = project.harnesses.find((item) => item.id === targetHarnessId);
@@ -622,11 +677,13 @@ export default function App2D() {
           selection={selection}
           selectedLabel={selectedLabel}
           selectedAnnotationId={selectedAnnotationId}
+          selectedHeatShrinkId={selectedHeatShrinkId}
           onSelectionChange={(next) => {
             setSelectedHarnessId(null);
             setSelection(next);
             setSelectedLabel(null);
             setSelectedAnnotationId(null);
+            setSelectedHeatShrinkId(null);
           }}
           onSelectComponentLabel={setSelectedLabel}
           onSelectAnnotation={(annotationId) => {
@@ -634,6 +691,13 @@ export default function App2D() {
             setSelection(emptySelection);
             setSelectedLabel(null);
             setSelectedAnnotationId(annotationId);
+            setSelectedHeatShrinkId(null);
+          }}
+          onSelectHeatShrink={(heatShrinkId) => {
+            setSelectedHarnessId(null);
+            setSelectedLabel(null);
+            setSelectedAnnotationId(null);
+            setSelectedHeatShrinkId(heatShrinkId);
           }}
           onMoveSelection={(selected, delta) => apply((current) => moveItems(
             current,
@@ -645,14 +709,17 @@ export default function App2D() {
           ))}
           onMoveConnectionRoute={(connectionId, point) => apply((current) => setConnectionRoute(current, harness.id, connectionId, point))}
           onMoveCableRunRoute={(cableRunId, point) => apply((current) => setCableRunRoute(current, harness.id, cableRunId, point))}
+          onMoveCableRunBreakout={(cableRunId, end, point) => apply((current) => setCableRunBreakout(current, harness.id, cableRunId, end, point))}
           onMoveCableRunLabel={(cableRunId, offset) => apply((current) => setCableRunLabelOffset(current, harness.id, cableRunId, offset))}
           onMoveComponentLabel={(componentId, label, offset) => apply((current) => setComponentLabelPlacement(current, harness.id, componentId, label, { offset }))}
           onMoveComponentPinMap={(componentId, offset) => apply((current) => setComponentPinMapOffset(current, harness.id, componentId, offset))}
+          onResizeComponent={(componentId, displayScale) => apply((current) => setComponentDisplayScale(current, harness.id, componentId, displayScale))}
           onRenameConnection={(connectionId, reference) => apply((current) => updateConnection(current, harness.id, connectionId, { reference }))}
           onUpdateProjectMetadata={(changes) => apply((current) => updateProjectMetadata(current, changes))}
           onUpdateHarnessMetadata={(changes) => apply((current) => updateHarnessMetadata(current, harness.id, changes))}
           onUpdateTitleBlock={(changes) => apply((current) => updateDrawingTitleBlock(current, harness.id, changes))}
           onUpdateAnnotation={(annotationId, changes) => apply((current) => updateDrawingAnnotation(current, harness.id, annotationId, changes))}
+          onUpdateHeatShrink={(heatShrinkId, changes) => apply((current) => updateCableHeatShrink(current, harness.id, heatShrinkId, changes))}
           onMousePositionChange={setMousePosition}
           onConnect={(from: PinEndpoint2D, to: PinEndpoint2D) => {
             try {
@@ -681,6 +748,7 @@ export default function App2D() {
         selectedComponent={selectedComponent}
         selectedConnection={selectedConnection}
         selectedCableRun={selectedCableRun}
+        selectedHeatShrink={selectedHeatShrink}
         selectedAnnotation={selectedAnnotation}
         lengthUnit={settings.lengthUnit}
         onChange={apply}
@@ -772,13 +840,14 @@ type NavigatorProps = {
   selectedComponentIds: string[];
   selectedCableRunIds: string[];
   onAddHarness: () => void;
+  onDeleteHarness: (harnessId: string) => void;
   onReorderHarness: (sourceHarnessId: string, targetHarnessId: string, placement: "before" | "after") => void;
   onSelectHarness: (harnessId: string) => void;
   onSelect: (harnessId: string, componentId: string) => void;
   onSelectCable: (harnessId: string, cableRunId: string) => void;
 };
 
-function Navigator({ project, activeHarnessId, selectedHarnessId, selectedComponentIds, selectedCableRunIds, onAddHarness, onReorderHarness, onSelectHarness, onSelect, onSelectCable }: NavigatorProps) {
+function Navigator({ project, activeHarnessId, selectedHarnessId, selectedComponentIds, selectedCableRunIds, onAddHarness, onDeleteHarness, onReorderHarness, onSelectHarness, onSelect, onSelectCable }: NavigatorProps) {
   const draggedHarnessId = useRef<string | null>(null);
   const dropTargetRef = useRef<{ harnessId: string; placement: "before" | "after" } | null>(null);
   const [draggingHarnessId, setDraggingHarnessId] = useState<string | null>(null);
@@ -805,7 +874,7 @@ function Navigator({ project, activeHarnessId, selectedHarnessId, selectedCompon
   return <aside className="hd2-navigator">
     <h2>프로젝트</h2>
     <div className="hd2-project-summary"><strong>{project.projectNumber}</strong><span>{project.name}</span></div>
-    <div className="hd2-tree-heading">하네스 <b>{project.harnesses.length}</b><button type="button" aria-label="새 하네스 도면 생성" onClick={onAddHarness}><Plus size={13} /></button></div>
+    <div className="hd2-tree-heading">하네스 <b>{project.harnesses.length}</b><button type="button" aria-label="새 하네스 도면 생성" onClick={onAddHarness}><Plus size={13} /></button><button type="button" aria-label="선택한 하네스 도면 삭제" disabled={!selectedHarnessId || project.harnesses.length <= 1} onClick={() => selectedHarnessId && onDeleteHarness(selectedHarnessId)}><Trash2 size={13} /></button></div>
     {project.harnesses.map((harness) => <div className="hd2-harness-tree" key={harness.id}>
       <button
         type="button"
@@ -854,13 +923,26 @@ type InspectorProps = {
   selectedComponent: Project2D["harnesses"][number]["components"][number] | undefined;
   selectedConnection: Project2D["harnesses"][number]["connections"][number] | undefined;
   selectedCableRun: Project2D["harnesses"][number]["cableRuns"][number] | undefined;
+  selectedHeatShrink: CableHeatShrink2D | undefined;
   selectedAnnotation: DrawingAnnotation2D | undefined;
   lengthUnit: LengthUnit2D;
   onChange: (update: (project: Project2D) => Project2D) => void;
 };
 
-function Inspector({ project, harnessId, selectedComponent, selectedConnection, selectedCableRun, selectedAnnotation, lengthUnit, onChange }: InspectorProps) {
+function Inspector({ project, harnessId, selectedComponent, selectedConnection, selectedCableRun, selectedHeatShrink, selectedAnnotation, lengthUnit, onChange }: InspectorProps) {
   const harness = project.harnesses.find((item) => item.id === harnessId)!;
+  if (selectedHeatShrink) {
+    const cableRun = harness.cableRuns.find((item) => item.id === selectedHeatShrink.cableRunId);
+    return <aside className="hd2-inspector">
+      <h2>속성 <span>HEAT SHRINK</span></h2>
+      <InspectorField label="참조" value={selectedHeatShrink.reference} onChange={(reference) => onChange((current) => updateCableHeatShrink(current, harnessId, selectedHeatShrink.id, { reference }))} />
+      <InspectorField label="표시 텍스트" value={selectedHeatShrink.text || selectedHeatShrink.reference} onChange={(text) => onChange((current) => updateCableHeatShrink(current, harnessId, selectedHeatShrink.id, { text }))} />
+      <InspectorField label="적용 케이블" value={cableRun?.reference ?? "—"} onChange={() => {}} readOnly />
+      <InspectorColor label="튜브 색상" value={selectedHeatShrink.color} onChange={(color) => onChange((current) => updateCableHeatShrink(current, harnessId, selectedHeatShrink.id, { color }))} />
+      <InspectorColor label="글자 색상" value={selectedHeatShrink.textColor || "#ffffff"} onChange={(textColor) => onChange((current) => updateCableHeatShrink(current, harnessId, selectedHeatShrink.id, { textColor }))} />
+      <div className="hd2-engine-note"><strong>경로 종속 수축튜브</strong><p>텍스트를 더블클릭해 직접 수정합니다. 몸체와 텍스트는 케이블 곡률을 따릅니다.</p></div>
+    </aside>;
+  }
   if (selectedAnnotation) {
     const update = (changes: Partial<Omit<DrawingAnnotation2D, "id" | "kind">>) => onChange((current) => updateDrawingAnnotation(current, harnessId, selectedAnnotation.id, changes));
     const hasText = selectedAnnotation.kind === "label" || selectedAnnotation.kind === "text";
@@ -890,6 +972,7 @@ function Inspector({ project, harnessId, selectedComponent, selectedConnection, 
       <InspectorField label="제조사" value={selectedComponent.manufacturer} onChange={(value) => onChange((current) => updateComponent(current, harnessId, selectedComponent.id, { manufacturer: value }))} />
       <label className="hd2-field"><span>핀 접속면</span><select value={placement.pinSide} onChange={(event) => onChange((current) => setComponentPinSide(current, harnessId, selectedComponent.id, event.target.value as "left" | "right"))}><option value="left">왼쪽</option><option value="right">오른쪽</option></select></label>
       <label className="hd2-field"><span>회전</span><select aria-label="커넥터 회전" value={placement.rotation ?? 0} onChange={(event) => onChange((current) => setComponentRotation(current, harnessId, selectedComponent.id, Number(event.target.value) as ComponentRotation2D))}><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+      <div className="hd2-engine-note"><strong>표시 배율 · {Math.round((placement.displayScale ?? 1) * 100)}%</strong><p>도면에서 커넥터를 선택한 뒤 오른쪽 아래 핸들을 끌어 조정합니다.</p></div>
       <label className="hd2-field"><span>참조 라벨 각도</span><input aria-label="참조 라벨 각도" type="number" step="1" value={placement.referenceLabel?.rotation ?? 0} onChange={(event) => onChange((current) => setComponentLabelPlacement(current, harnessId, selectedComponent.id, "referenceLabel", { rotation: Number(event.target.value) }))} /></label>
       <label className="hd2-field"><span>이름 라벨 각도</span><input aria-label="이름 라벨 각도" type="number" step="1" value={placement.nameLabel?.rotation ?? 0} onChange={(event) => onChange((current) => setComponentLabelPlacement(current, harnessId, selectedComponent.id, "nameLabel", { rotation: Number(event.target.value) }))} /></label>
       <div className="hd2-engine-note"><strong>라벨 위치</strong><p>도면의 참조/이름 라벨을 마우스로 끌어 배치합니다.</p></div>
@@ -923,7 +1006,6 @@ function Inspector({ project, harnessId, selectedComponent, selectedConnection, 
     <InspectorField label="작성자" value={harness.drawing.titleBlock?.createdBy ?? ""} onChange={(createdBy) => onChange((current) => updateDrawingTitleBlock(current, harnessId, { createdBy }))} />
     <InspectorField label="검토자" value={harness.drawing.titleBlock?.reviewedBy ?? ""} onChange={(reviewedBy) => onChange((current) => updateDrawingTitleBlock(current, harnessId, { reviewedBy }))} />
     <InspectorField label="승인자" value={harness.drawing.titleBlock?.approvedBy ?? ""} onChange={(approvedBy) => onChange((current) => updateDrawingTitleBlock(current, harnessId, { approvedBy }))} />
-    <div className="hd2-engine-note"><strong>새 2D 엔진</strong><p>연결 정본과 도면 배치를 분리했습니다. 3D 데이터와 기존 프로젝트 변환 코드는 이 화면에서 사용하지 않습니다.</p></div>
   </aside>;
 }
 

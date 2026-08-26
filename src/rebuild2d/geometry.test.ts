@@ -41,6 +41,8 @@ describe("2D 도면 형상", () => {
       .toEqual({ x: 110, y: 70 });
     expect(pinPosition(symbolConnector, { position: { x: 100, y: 50 }, pinSide: "right", rotation: 90 }, "P1"))
       .toEqual({ x: 155, y: 115 });
+    expect(pinPosition(symbolConnector, { position: { x: 100, y: 50 }, pinSide: "right", displayScale: 2 }, "P1"))
+      .toEqual({ x: 280, y: 90 });
   });
 
   it("화면 경로를 문서에 저장하지 않고 양 끝점에서 계산한다", () => {
@@ -73,5 +75,11 @@ describe("2D 도면 형상", () => {
     expect(geometry.fromJunction.x).toBeGreaterThan(350);
     expect(geometry.toJunction.x).toBeLessThan(700);
     expect(geometry.connections).toHaveLength(1);
+
+    harness.drawing.cableRunBreakouts = { C1: { from: { x: 380, y: 140 }, to: { x: 610, y: 160 } } };
+    expect(cableRunGeometry(harness, "C1")).toMatchObject({
+      fromJunction: { x: 380, y: 140 },
+      toJunction: { x: 610, y: 160 },
+    });
   });
 });

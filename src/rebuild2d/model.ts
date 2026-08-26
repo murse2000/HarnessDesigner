@@ -1,3 +1,5 @@
+import type { ModelAsset } from "../domain/types";
+
 export const PROJECT_DOCUMENT_TYPE = "harness-designer-2d" as const;
 export const PROJECT_SCHEMA_VERSION = 2 as const;
 
@@ -28,6 +30,27 @@ export type PartDrawing2D = {
   outlineStrength?: number;
   imageDataUrl?: string;
   unsupportedEntities: Array<{ type: string; count: number }>;
+  editorState?: PartDrawingEditorState2D;
+};
+
+export type PartDrawingEditorState2D = {
+  source: {
+    sourceName: string;
+    bounds: Point2D & { width: number; height: number };
+    paths: PartDrawingPath2D[];
+    unsupported: Array<{ type: string; count: number }>;
+    imageDataUrl?: string;
+    sourceType?: "image";
+    pageNumber?: number;
+    pageCount?: number;
+  };
+  selection: Point2D & { width: number; height: number };
+  viewBox: Point2D & { width: number; height: number };
+  pinPoints: Array<Point2D | null>;
+  stepRotation?: { x: number; y: number; z: number };
+  stepAsset?: ModelAsset;
+  stepRenderMode?: "shaded" | "technical";
+  stepSurfaceColors?: Record<string, string>;
 };
 
 export type Pin2D = {
@@ -103,10 +126,22 @@ export type CableRun2D = {
   source: PartSource2D;
 };
 
+export type CableHeatShrink2D = {
+  id: string;
+  cableRunId: string;
+  reference: string;
+  text: string;
+  startRatio: number;
+  endRatio: number;
+  color: string;
+  textColor: string;
+};
+
 export type ComponentPlacement2D = {
   position: Point2D;
   pinSide: "left" | "right";
   rotation?: ComponentRotation2D;
+  displayScale?: number;
   referenceLabel?: ConnectorLabelPlacement2D;
   nameLabel?: ConnectorLabelPlacement2D;
   pinMapOffset?: Point2D;
@@ -147,13 +182,20 @@ export type DrawingLayout2D = {
   componentPlacements: Record<string, ComponentPlacement2D>;
   connectionRoutes?: Record<string, DrawingRoute2D>;
   cableRunRoutes?: Record<string, DrawingRoute2D>;
+  cableRunBreakouts?: Record<string, CableRunBreakout2D>;
   cableRunLabelOffsets?: Record<string, Point2D>;
+  cableHeatShrinks?: CableHeatShrink2D[];
   titleBlock?: DrawingTitleBlock2D;
   annotations?: DrawingAnnotation2D[];
 };
 
 export type DrawingRoute2D = {
   point: Point2D;
+};
+
+export type CableRunBreakout2D = {
+  from?: Point2D;
+  to?: Point2D;
 };
 
 export type Harness2D = {
@@ -201,7 +243,9 @@ export type CopiedHarnessDrawing2D = {
   cableRuns: CableRun2D[];
   connectionRoutes: Record<string, DrawingRoute2D>;
   cableRunRoutes: Record<string, DrawingRoute2D>;
+  cableRunBreakouts: Record<string, CableRunBreakout2D>;
   cableRunLabelOffsets: Record<string, Point2D>;
+  cableHeatShrinks: CableHeatShrink2D[];
 };
 
 export type CopiedHarness2D = {
@@ -238,7 +282,9 @@ export function createEmptyProject(): Project2D {
         componentPlacements: {},
         connectionRoutes: {},
         cableRunRoutes: {},
+        cableRunBreakouts: {},
         cableRunLabelOffsets: {},
+        cableHeatShrinks: [],
         titleBlock: { drawingTitle: "HARNESS ASSEMBLY DRAWING", createdDate: timestamp.slice(0, 10), createdBy: "", reviewedBy: "", approvedBy: "" },
         annotations: [],
       },
@@ -261,7 +307,9 @@ export function addHarness(project: Project2D): { project: Project2D; harnessId:
       componentPlacements: {},
       connectionRoutes: {},
       cableRunRoutes: {},
+      cableRunBreakouts: {},
       cableRunLabelOffsets: {},
+      cableHeatShrinks: [],
       titleBlock: { drawingTitle: "HARNESS ASSEMBLY DRAWING", createdDate: timestamp.slice(0, 10), createdBy: "", reviewedBy: "", approvedBy: "" },
       annotations: [],
     },
@@ -270,6 +318,11 @@ export function addHarness(project: Project2D): { project: Project2D; harnessId:
     harnessId,
     project: { ...project, updatedAt: timestamp, harnesses: [...project.harnesses, harness] },
   };
+}
+
+export function deleteHarness(project: Project2D, harnessId: string): Project2D {
+  if (project.harnesses.length <= 1 || !project.harnesses.some((harness) => harness.id === harnessId)) return project;
+  return touch({ ...project, harnesses: project.harnesses.filter((harness) => harness.id !== harnessId) });
 }
 
 export function reorderHarness(
@@ -418,9 +471,18 @@ export function copyHarnessDrawing(
     cableRunRoutes: Object.fromEntries(Object.entries(harness.drawing.cableRunRoutes ?? {})
       .filter(([cableRunId]) => cableRunIds.has(cableRunId))
       .map(([cableRunId, route]) => [cableRunId, { point: { ...route.point } }])),
+    cableRunBreakouts: Object.fromEntries(Object.entries(harness.drawing.cableRunBreakouts ?? {})
+      .filter(([cableRunId]) => cableRunIds.has(cableRunId))
+      .map(([cableRunId, breakout]) => [cableRunId, {
+        from: breakout.from ? { ...breakout.from } : undefined,
+        to: breakout.to ? { ...breakout.to } : undefined,
+      }])),
     cableRunLabelOffsets: Object.fromEntries(Object.entries(harness.drawing.cableRunLabelOffsets ?? {})
       .filter(([cableRunId]) => cableRunIds.has(cableRunId))
       .map(([cableRunId, offset]) => [cableRunId, { ...offset }])),
+    cableHeatShrinks: (harness.drawing.cableHeatShrinks ?? [])
+      .filter((heatShrink) => cableRunIds.has(heatShrink.cableRunId))
+      .map((heatShrink) => ({ ...heatShrink })),
   };
 }
 
@@ -456,7 +518,9 @@ export function pasteHarness(
       componentPlacements: {},
       connectionRoutes: {},
       cableRunRoutes: {},
+      cableRunBreakouts: {},
       cableRunLabelOffsets: {},
+      cableHeatShrinks: [],
       titleBlock: copied.titleBlock ? { ...copied.titleBlock } : undefined,
       annotations: copied.annotations.map((annotation) => ({ ...cloneAnnotation(annotation), id: createId("annotation") })),
     },
@@ -556,11 +620,26 @@ export function pasteHarnessDrawing(
     const id = cableRunIdMap.get(oldId);
     if (id) cableRunRoutes[id] = { point: { x: route.point.x + offset.x, y: route.point.y + offset.y } };
   });
+  const cableRunBreakouts = { ...harness.drawing.cableRunBreakouts };
+  Object.entries(copied.cableRunBreakouts).forEach(([oldId, breakout]) => {
+    const id = cableRunIdMap.get(oldId);
+    if (id) cableRunBreakouts[id] = {
+      from: breakout.from ? { x: breakout.from.x + offset.x, y: breakout.from.y + offset.y } : undefined,
+      to: breakout.to ? { x: breakout.to.x + offset.x, y: breakout.to.y + offset.y } : undefined,
+    };
+  });
   const cableRunLabelOffsets = { ...harness.drawing.cableRunLabelOffsets };
   Object.entries(copied.cableRunLabelOffsets).forEach(([oldId, labelOffset]) => {
     const id = cableRunIdMap.get(oldId);
     if (id) cableRunLabelOffsets[id] = { ...labelOffset };
   });
+  const cableHeatShrinks = [
+    ...(harness.drawing.cableHeatShrinks ?? []),
+    ...copied.cableHeatShrinks.flatMap((heatShrink) => {
+      const cableRunId = cableRunIdMap.get(heatShrink.cableRunId);
+      return cableRunId ? [{ ...heatShrink, id: createId("heat-shrink"), cableRunId }] : [];
+    }),
+  ];
 
   return {
     componentIds: components.map((component) => component.id),
@@ -576,7 +655,9 @@ export function pasteHarnessDrawing(
         componentPlacements,
         connectionRoutes,
         cableRunRoutes,
+        cableRunBreakouts,
         cableRunLabelOffsets,
+        cableHeatShrinks,
       },
     })),
   };
@@ -672,15 +753,21 @@ export function moveItems(
       };
     });
     const cableRunRoutes = { ...harness.drawing.cableRunRoutes };
+    const cableRunBreakouts = { ...harness.drawing.cableRunBreakouts };
     cableRunIds.forEach((cableRunId) => {
       const route = cableRunRoutes[cableRunId];
       if (route) cableRunRoutes[cableRunId] = {
         point: { x: route.point.x + delta.x, y: route.point.y + delta.y },
       };
+      const breakout = cableRunBreakouts[cableRunId];
+      if (breakout) cableRunBreakouts[cableRunId] = {
+        from: breakout.from ? { x: breakout.from.x + delta.x, y: breakout.from.y + delta.y } : undefined,
+        to: breakout.to ? { x: breakout.to.x + delta.x, y: breakout.to.y + delta.y } : undefined,
+      };
     });
     return {
       ...harness,
-      drawing: { ...harness.drawing, componentPlacements, connectionRoutes, cableRunRoutes },
+      drawing: { ...harness.drawing, componentPlacements, connectionRoutes, cableRunRoutes, cableRunBreakouts },
     };
   });
 }
@@ -876,7 +963,9 @@ export function deleteItems(
         componentPlacements: placements,
         connectionRoutes: Object.fromEntries(Object.entries(harness.drawing.connectionRoutes ?? {}).filter(([id]) => retainedConnectionIds.has(id))),
         cableRunRoutes: Object.fromEntries(Object.entries(harness.drawing.cableRunRoutes ?? {}).filter(([id]) => retainedCableRunIds.has(id))),
+        cableRunBreakouts: Object.fromEntries(Object.entries(harness.drawing.cableRunBreakouts ?? {}).filter(([id]) => retainedCableRunIds.has(id))),
         cableRunLabelOffsets: Object.fromEntries(Object.entries(harness.drawing.cableRunLabelOffsets ?? {}).filter(([id]) => retainedCableRunIds.has(id))),
+        cableHeatShrinks: (harness.drawing.cableHeatShrinks ?? []).filter((heatShrink) => retainedCableRunIds.has(heatShrink.cableRunId)),
       },
     };
   });
@@ -913,6 +1002,29 @@ export function setCableRunRoute(
       drawing: {
         ...harness.drawing,
         cableRunRoutes: { ...harness.drawing.cableRunRoutes, [cableRunId]: { point } },
+      },
+    };
+  });
+}
+
+export function setCableRunBreakout(
+  project: Project2D,
+  harnessId: string,
+  cableRunId: string,
+  end: keyof CableRunBreakout2D,
+  point: Point2D,
+) {
+  return updateHarness(project, harnessId, (harness) => {
+    if (!harness.cableRuns.some((cableRun) => cableRun.id === cableRunId)) return harness;
+    const current = harness.drawing.cableRunBreakouts?.[cableRunId] ?? {};
+    return {
+      ...harness,
+      drawing: {
+        ...harness.drawing,
+        cableRunBreakouts: {
+          ...harness.drawing.cableRunBreakouts,
+          [cableRunId]: { ...current, [end]: { ...point } },
+        },
       },
     };
   });
@@ -1010,6 +1122,28 @@ export function setComponentRotation(
   });
 }
 
+export function setComponentDisplayScale(
+  project: Project2D,
+  harnessId: string,
+  componentId: string,
+  displayScale: number,
+) {
+  return updateHarness(project, harnessId, (harness) => {
+    const placement = harness.drawing.componentPlacements[componentId];
+    if (!placement || !Number.isFinite(displayScale)) return harness;
+    return {
+      ...harness,
+      drawing: {
+        ...harness.drawing,
+        componentPlacements: {
+          ...harness.drawing.componentPlacements,
+          [componentId]: { ...placement, displayScale: Math.min(5, Math.max(0.2, displayScale)) },
+        },
+      },
+    };
+  });
+}
+
 export function setComponentLabelPlacement(
   project: Project2D,
   harnessId: string,
@@ -1092,6 +1226,68 @@ export function updateCableRun(
       } : connection),
     };
   });
+}
+
+export function addCableHeatShrink(
+  project: Project2D,
+  harnessId: string,
+  cableRunId: string,
+): { project: Project2D; heatShrinkId: string } {
+  const harness = project.harnesses.find((item) => item.id === harnessId);
+  if (!harness?.cableRuns.some((cableRun) => cableRun.id === cableRunId)) {
+    throw new Error("수축튜브를 추가할 케이블을 찾을 수 없습니다.");
+  }
+  const heatShrinkId = createId("heat-shrink");
+  const reference = nextHeatShrinkReference((harness.drawing.cableHeatShrinks ?? []).map((item) => item.reference));
+  return {
+    heatShrinkId,
+    project: updateHarness(project, harnessId, (current) => ({
+      ...current,
+      drawing: {
+        ...current.drawing,
+        cableHeatShrinks: [...(current.drawing.cableHeatShrinks ?? []), {
+          id: heatShrinkId,
+          cableRunId,
+          reference,
+          text: reference,
+          startRatio: 0.4,
+          endRatio: 0.6,
+          color: "#202a32",
+          textColor: "#ffffff",
+        }],
+      },
+    })),
+  };
+}
+
+export function updateCableHeatShrink(
+  project: Project2D,
+  harnessId: string,
+  heatShrinkId: string,
+  changes: Partial<Pick<CableHeatShrink2D, "reference" | "text" | "startRatio" | "endRatio" | "color" | "textColor">>,
+) {
+  return updateHarness(project, harnessId, (harness) => ({
+    ...harness,
+    drawing: {
+      ...harness.drawing,
+      cableHeatShrinks: (harness.drawing.cableHeatShrinks ?? []).map((heatShrink) => heatShrink.id === heatShrinkId ? {
+        ...heatShrink,
+        ...changes,
+        startRatio: clampRatio(changes.startRatio ?? heatShrink.startRatio),
+        endRatio: clampRatio(changes.endRatio ?? heatShrink.endRatio),
+      } : heatShrink),
+    },
+  }));
+}
+
+export function deleteCableHeatShrink(project: Project2D, harnessId: string, heatShrinkId: string) {
+  return updateHarness(project, harnessId, (harness) => ({
+    ...harness,
+    drawing: {
+      ...harness.drawing,
+      cableHeatShrinks: (harness.drawing.cableHeatShrinks ?? []).filter((heatShrink) => heatShrink.id !== heatShrinkId),
+    },
+  }));
 }
 
 export function updateProjectMetadata(
@@ -1209,6 +1405,17 @@ function nextCableReference(references: string[]) {
   let index = 1;
   while (used.has(`CBL-${String(index).padStart(3, "0")}`)) index += 1;
   return `CBL-${String(index).padStart(3, "0")}`;
+}
+
+function nextHeatShrinkReference(references: string[]) {
+  const used = new Set(references);
+  let index = 1;
+  while (used.has(`HS-${String(index).padStart(3, "0")}`)) index += 1;
+  return `HS-${String(index).padStart(3, "0")}`;
+}
+
+function clampRatio(value: number) {
+  return Math.min(1, Math.max(0, value));
 }
 
 function updateHarness(project: Project2D, harnessId: string, update: (harness: Harness2D) => Harness2D) {

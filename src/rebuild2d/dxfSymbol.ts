@@ -38,10 +38,10 @@ export function parseDxfDrawing(text: string, sourceName: string): ParsedDxf2D {
 export function extractPartDrawing(
   parsed: ParsedDxf2D,
   selection: Rectangle2D,
-  millimetersPerUnit: number,
+  symbolScale: number,
 ): PartDrawing2D {
-  if (!Number.isFinite(millimetersPerUnit) || millimetersPerUnit <= 0) {
-    throw new Error("도면 배율은 0보다 커야 합니다.");
+  if (!Number.isFinite(symbolScale) || symbolScale <= 0) {
+    throw new Error("심벌 크기를 계산할 수 없습니다.");
   }
   const normalized = normalizeRectangle(selection);
   if (normalized.width <= 0 || normalized.height <= 0) throw new Error("추출할 도면 영역을 선택하세요.");
@@ -50,15 +50,15 @@ export function extractPartDrawing(
     .map((path) => ({
       ...path,
       points: path.points.map((point) => ({
-        x: (point.x - normalized.x) * millimetersPerUnit,
-        y: (point.y - normalized.y) * millimetersPerUnit,
+        x: (point.x - normalized.x) * symbolScale,
+        y: (point.y - normalized.y) * symbolScale,
       })),
     }));
   if (paths.length === 0) throw new Error("선택 영역에 표시 가능한 도형이 없습니다.");
   return {
     sourceName: parsed.sourceName,
-    widthMm: normalized.width * millimetersPerUnit,
-    heightMm: normalized.height * millimetersPerUnit,
+    widthMm: normalized.width * symbolScale,
+    heightMm: normalized.height * symbolScale,
     paths,
     unsupportedEntities: parsed.unsupported,
   };
@@ -77,6 +77,11 @@ export function drawingPathData(path: PartDrawingPath2D) {
   if (path.points.length === 0) return "";
   const data = path.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   return path.closed ? `${data} Z` : data;
+}
+
+export function partDrawingStrokeWidth(outlineStrength?: number) {
+  const strength = Number.isFinite(outlineStrength) && outlineStrength! > 0 ? outlineStrength! : 1;
+  return 1.15 * strength;
 }
 
 function visitEntities(

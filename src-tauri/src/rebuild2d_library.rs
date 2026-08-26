@@ -60,6 +60,8 @@ pub struct PartDrawing2d {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_data_url: Option<String>,
     pub unsupported_entities: Vec<UnsupportedEntity2d>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_state: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -555,6 +557,7 @@ fn validate_part(part: &LibraryPart2d) -> Result<(), String> {
                             !image.starts_with("data:image/png;base64,")
                                 && !image.starts_with("data:image/jpeg;base64,")
                                 && !image.starts_with("data:image/webp;base64,")
+                                && !image.starts_with("data:image/svg+xml;charset=utf-8,")
                         }))
             }) =>
         {
@@ -712,6 +715,9 @@ mod tests {
                 r#type: "TEXT".into(),
                 count: 2,
             }],
+            editor_state: Some(serde_json::json!({
+                "selection": { "x": 12.0, "y": 8.0, "width": 20.0, "height": 8.0 },
+            })),
         });
 
         let saved = upsert(&path, drawing_part).unwrap();
@@ -724,22 +730,24 @@ mod tests {
         assert_eq!(reopened.pins[0].anchor.as_ref().unwrap().x_mm, 10.0);
         assert_eq!(reopened.drawing.as_ref().unwrap().source_name, "vendor.dxf");
         assert_eq!(reopened.drawing.as_ref().unwrap().outline_strength, Some(2.5));
+        assert_eq!(reopened.drawing.as_ref().unwrap().editor_state, saved.drawing.as_ref().unwrap().editor_state);
     }
 
     #[test]
-    fn stores_pdf_cropped_connector_drawing() {
+    fn stores_cropped_image_connector_drawing() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("parts.hlib2d");
         create(&path, "Parts").unwrap();
         let mut drawing_part = part();
         drawing_part.drawing = Some(PartDrawing2d {
-            source_name: "vendor.pdf · 2페이지".into(),
+            source_name: "vendor.png".into(),
             width_mm: 18.0,
             height_mm: 9.0,
             paths: Vec::new(),
             outline_strength: None,
             image_data_url: Some("data:image/png;base64,AA==".into()),
             unsupported_entities: Vec::new(),
+            editor_state: None,
         });
 
         upsert(&path, drawing_part).unwrap();
@@ -749,9 +757,43 @@ mod tests {
             .remove(0);
 
         let drawing = reopened.drawing.unwrap();
-        assert_eq!(drawing.source_name, "vendor.pdf · 2페이지");
+        assert_eq!(drawing.source_name, "vendor.png");
         assert!(drawing.paths.is_empty());
         assert!(drawing.image_data_url.unwrap().starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn stores_step_projected_svg_connector_drawing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("parts.hlib2d");
+        create(&path, "Parts").unwrap();
+        let mut drawing_part = part();
+        drawing_part.drawing = Some(PartDrawing2d {
+            source_name: "housing.stp · STEP 투영".into(),
+            width_mm: 18.0,
+            height_mm: 9.0,
+            paths: Vec::new(),
+            outline_strength: Some(2.0),
+            image_data_url: Some("data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C/svg%3E".into()),
+            unsupported_entities: Vec::new(),
+            editor_state: Some(serde_json::json!({
+                "selection": { "x": 0.0, "y": 0.0, "width": 18.0, "height": 9.0 },
+            })),
+        });
+
+        let saved = upsert(&path, drawing_part).unwrap();
+        let reopened = query(&path, "TEST-04", Some("housing"), 0, 10)
+            .unwrap()
+            .parts
+            .remove(0);
+
+        assert_eq!(reopened, saved);
+        assert!(reopened
+            .drawing
+            .unwrap()
+            .image_data_url
+            .unwrap()
+            .starts_with("data:image/svg+xml;charset=utf-8,"));
     }
 
     #[test]

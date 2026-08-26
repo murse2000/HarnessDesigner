@@ -13,6 +13,8 @@ const hiddenEditorSelectors = [
   ".hd2-wire-hit",
   ".hd2-pin-hit",
   ".hd2-route-handle",
+  ".hd2-heat-shrink-hit",
+  ".hd2-heat-shrink-handle",
   ".hd2-part-symbol-hit",
   ".hd2-annotation-hit",
   ".hd2-annotation-selection",
@@ -106,8 +108,26 @@ export function preparePaperDrawing(source: SVGSVGElement, sheet: DrawingSheet2D
   };
 }
 
-export async function createDrawingPdfBytes(drawing: PaperDrawing): Promise<Uint8Array> {
+export async function createDrawingPdfBytes(drawings: PaperDrawing | PaperDrawing[]): Promise<Uint8Array> {
   const { jsPDF } = await import("jspdf");
+  const pages = Array.isArray(drawings) ? drawings : [drawings];
+  if (pages.length === 0) throw new Error("PDF로 출력할 하네스 도면이 없습니다.");
+  const firstPage = pages[0];
+  const pdf = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: [firstPage.widthMm, firstPage.heightMm],
+    compress: true,
+  });
+
+  for (const [index, drawing] of pages.entries()) {
+    if (index > 0) pdf.addPage([drawing.widthMm, drawing.heightMm], "landscape");
+    pdf.addImage(await renderDrawingJpeg(drawing), "JPEG", 0, 0, drawing.widthMm, drawing.heightMm);
+  }
+  return new Uint8Array(pdf.output("arraybuffer"));
+}
+
+async function renderDrawingJpeg(drawing: PaperDrawing): Promise<string> {
   const canvas = document.createElement("canvas");
   const dotsPerInch = 144;
   canvas.width = Math.round(drawing.widthMm / 25.4 * dotsPerInch);
@@ -130,15 +150,7 @@ export async function createDrawingPdfBytes(drawing: PaperDrawing): Promise<Uint
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  const pdf = new jsPDF({
-    orientation: "landscape",
-    unit: "mm",
-    format: [drawing.widthMm, drawing.heightMm],
-    compress: true,
-  });
-  pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, drawing.widthMm, drawing.heightMm);
-  return new Uint8Array(pdf.output("arraybuffer"));
+  return canvas.toDataURL("image/jpeg", 0.95);
 }
 
 export async function printPaperDrawing(drawing: PaperDrawing, requestPrint: () => void | Promise<void> = () => window.print()) {
