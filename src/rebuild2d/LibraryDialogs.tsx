@@ -15,6 +15,8 @@ import {
 } from "./library";
 import type { ConnectorDraft } from "./model";
 import { drawingPathData, partDrawingStrokeWidth } from "./dxfSymbol";
+import { LibraryPartThumbnail } from "./LibraryPartThumbnail";
+import { PartAddTabs, type PartAddKind } from "./PartAddTabs";
 import { PartSymbolEditor } from "./PartSymbolEditor";
 import { preferStepShadedDrawing } from "./stepSymbol";
 
@@ -156,7 +158,7 @@ export function PartsLibraryDialog({ summary, onSummaryChange, onClose }: Librar
           <div className="hd2-library-count">검색 결과 {page?.total ?? 0}개 · 전체 {summary.partCount}개</div>
           <div className="hd2-library-items">
             {page?.parts.map((part) => <button type="button" key={part.id} className={draft.id === part.id ? "is-selected" : ""} onClick={() => setDraft(cloneLibraryPart(part))}>
-              <LibraryDrawingThumbnail part={part} /><span>{part.category.toUpperCase()}</span><strong>{part.partNumber}</strong><em>{part.name}</em><small>{partCountLabel(part)}</small>
+              <LibraryPartThumbnail part={part} /><span>{part.category.toUpperCase()}</span><strong>{part.partNumber}</strong><em>{part.name}</em><small>{partCountLabel(part)}</small>
             </button>)}
             {page && page.parts.length === 0 && <p>등록된 부품이 없습니다.</p>}
           </div>
@@ -225,18 +227,6 @@ function PartEditor({ draft, onDraftChange, onNew, onSave, onDelete, disabled }:
   </section>;
 }
 
-function LibraryDrawingThumbnail({ part }: { part: LibraryPart2D }) {
-  if (!part.drawing) return <span className="hd2-library-drawing-thumb is-empty" aria-label={`${part.partNumber} 2D 도면 없음`}>도면 없음</span>;
-  const drawing = preferStepShadedDrawing(part.drawing);
-  return <span className="hd2-library-drawing-thumb" aria-label={`${part.partNumber} 2D 도면 등록됨`} title={drawing.sourceName}>
-    <svg viewBox={`0 0 ${drawing.widthMm} ${drawing.heightMm}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      {drawing.imageDataUrl && <image href={drawing.imageDataUrl} width={drawing.widthMm} height={drawing.heightMm} preserveAspectRatio="none" />}
-      {drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} style={{ strokeWidth: partDrawingStrokeWidth(drawing.outlineStrength) }} />)}
-    </svg>
-    <b>2D</b>
-  </span>;
-}
-
 function DrawingPreview({ draft }: { draft: LibraryPartDraft2D }) {
   const drawing = preferStepShadedDrawing(draft.drawing!);
   return <section className="hd2-library-drawing-preview">
@@ -268,9 +258,10 @@ type ConnectorPickerProps = {
   onCancel: () => void;
   onOpenLibrary: () => void;
   onSubmit: (draft: ConnectorDraft) => void;
+  onKindChange?: (kind: PartAddKind) => void;
 };
 
-export function ConnectorPickerDialog({ summary, onCancel, onOpenLibrary, onSubmit }: ConnectorPickerProps) {
+export function ConnectorPickerDialog({ summary, onCancel, onOpenLibrary, onSubmit, onKindChange }: ConnectorPickerProps) {
   const [mode, setMode] = useState<"library" | "manual">(summary ? "library" : "manual");
   const [query, setQuery] = useState("");
   const [parts, setParts] = useState<LibraryPart2D[]>([]);
@@ -300,18 +291,19 @@ export function ConnectorPickerDialog({ summary, onCancel, onOpenLibrary, onSubm
   }, [mode, summary?.path]);
 
   return <div className="hd2-dialog-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-    <form className="hd2-dialog hd2-connector-picker" onSubmit={(event) => {
+    <form className={`hd2-dialog hd2-connector-picker${onKindChange ? " is-unified" : ""}`} role="dialog" aria-label={onKindChange ? "부품 추가" : "커넥터 추가"} onSubmit={(event) => {
       event.preventDefault();
       if (mode === "library" && selected && summary) onSubmit(libraryPartToConnectorDraft(selected, summary));
       if (mode === "manual") onSubmit(manual);
     }}>
-      <header><strong>커넥터 추가</strong><span>{mode === "library" ? "외부 라이브러리 부품의 스냅샷을 배치합니다." : "새 2D 부품 인스턴스를 만듭니다."}</span></header>
+      <header><strong>{onKindChange ? "부품 추가" : "커넥터 추가"}</strong><span>{mode === "library" ? "외부 라이브러리 부품의 스냅샷을 배치합니다." : "새 2D 부품 인스턴스를 만듭니다."}</span></header>
+      {onKindChange && <PartAddTabs active="housing" onChange={onKindChange} />}
       <div className="hd2-dialog-tabs"><button type="button" className={mode === "library" ? "is-selected" : ""} disabled={!summary} onClick={() => setMode("library")}>부품 라이브러리</button><button type="button" className={mode === "manual" ? "is-selected" : ""} onClick={() => setMode("manual")}>직접 입력</button><button type="button" onClick={onOpenLibrary}>라이브러리 관리</button></div>
       {mode === "library" ? <div className="hd2-picker-library">
         <div className="hd2-picker-search"><Search size={14} /><input aria-label="커넥터 라이브러리 검색" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void search(); } }} /><button type="button" onClick={() => void search()}>검색</button></div>
         {loading && <div className="hd2-picker-loading">검색 중...</div>}
         {error && <div className="hd2-library-error">{error}</div>}
-        <div>{parts.map((part) => <button type="button" className={selectedId === part.id ? "is-selected" : ""} key={part.id} onClick={() => setSelectedId(part.id)} onDoubleClick={() => onSubmit(libraryPartToConnectorDraft(part, summary!))}><span>{part.manufacturer}</span><strong>{part.partNumber}</strong><em>{part.name}</em><small>{part.pins.length}P</small></button>)}</div>
+        <div>{parts.map((part) => <button type="button" className={selectedId === part.id ? "is-selected" : ""} key={part.id} onClick={() => setSelectedId(part.id)} onDoubleClick={() => onSubmit(libraryPartToConnectorDraft(part, summary!))}><LibraryPartThumbnail part={part} /><span>{part.manufacturer}</span><strong>{part.partNumber}</strong><em>{part.name}</em><small>{part.pins.length}P</small></button>)}</div>
       </div> : <div className="hd2-picker-manual">
         <DialogField label="파트명" value={manual.name} onChange={(name) => setManual((current) => ({ ...current, name }))} />
         <DialogField label="파트번호" value={manual.partNumber} onChange={(partNumber) => setManual((current) => ({ ...current, partNumber }))} />

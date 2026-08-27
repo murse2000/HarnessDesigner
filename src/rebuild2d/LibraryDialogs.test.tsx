@@ -38,12 +38,21 @@ describe("라이브러리 커넥터 선택", () => {
         outerDiameterMm: null,
         pins: [{ number: "1", name: "POWER" }, { number: "2", name: "GND" }],
         cores: [],
+        drawing: {
+          sourceName: "connector.png",
+          widthMm: 20,
+          heightMm: 10,
+          paths: [],
+          imageDataUrl: "data:image/png;base64,AA==",
+          unsupportedEntities: [],
+        },
       }],
     };
     backendInvoke.mockResolvedValue(page);
     const onSubmit = vi.fn();
 
     render(<ConnectorPickerDialog summary={summary} onCancel={() => {}} onOpenLibrary={() => {}} onSubmit={onSubmit} />);
+    expect(await screen.findByLabelText("TEST-04 부품 이미지")).toContainHTML("<image");
     fireEvent.click(await screen.findByText("TEST-04"));
     fireEvent.click(screen.getByRole("button", { name: "추가" }));
 
@@ -94,8 +103,8 @@ describe("라이브러리 커넥터 선택", () => {
 
     render(<PartsLibraryDialog summary={page.summary} onSummaryChange={() => {}} onClose={() => {}} />);
 
-    expect(await screen.findByLabelText("DRAWING-04 2D 도면 등록됨")).toContainHTML("<image");
-    expect(screen.getByLabelText("EMPTY-04 2D 도면 없음")).toHaveTextContent("도면 없음");
+    expect(await screen.findByLabelText("DRAWING-04 부품 이미지")).toContainHTML("<image");
+    expect(screen.getByLabelText("EMPTY-04 기본 부품 이미지")).toContainHTML("<svg");
     fireEvent.click(screen.getByText("DRAWING-04"));
     expect(screen.getByRole("button", { name: "2D 도면 · 등록됨" })).toBeInTheDocument();
     expect(screen.getByText("drawing.png")).toBeInTheDocument();

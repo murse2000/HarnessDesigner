@@ -1,7 +1,7 @@
 {
   "name": "harness-designer",
   "private": true,
-  "version": "0.3.47",
+  "version": "0.3.60",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "@xyflow/react": "^12.11.3",
     "dxf-parser": "^1.1.2",
     "jspdf": "^4.2.1",
+    "lz-string": "^1.5.0",
     "lucide-react": "^1.31.0",
     "occt-import-js": "^0.0.23",
     "react": "^19.2.8",

@@ -3,6 +3,7 @@ import { cableRunGeometry, connectorBounds, connectorHeight, connectorSize, CONN
 import { drawingPathData, partDrawingStrokeWidth } from "./dxfSymbol";
 import type { CableHeatShrink2D, CableRunBreakout2D, ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D } from "./model";
 import type { Settings2D } from "./settings";
+import { splitWireColor, wireColorValue } from "./wireColor";
 
 export type CanvasSelection = {
   componentIds: string[];
@@ -113,10 +114,12 @@ type MarqueeDrag = {
 
 type AnnotationDrag = {
   annotationId: string;
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   pointerStart: Point2D;
   original: DrawingAnnotation2D;
   pointerId: number;
+  center?: Point2D;
+  startAngle?: number;
 };
 
 type ComponentScaleDrag = {
@@ -331,21 +334,36 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       setPreviewCableLabelOffsets({ [cableLabelDrag.cableRunId]: offset });
     }
     if (annotationDrag) {
-      const delta = {
-        x: snap(world.x - annotationDrag.pointerStart.x),
-        y: snap(world.y - annotationDrag.pointerStart.y),
+      const rawDelta = {
+        x: world.x - annotationDrag.pointerStart.x,
+        y: world.y - annotationDrag.pointerStart.y,
       };
-      setPreviewAnnotation(annotationDrag.mode === "move" ? {
+      const delta = { x: snap(rawDelta.x), y: snap(rawDelta.y) };
+      if (annotationDrag.mode === "rotate" && annotationDrag.center && annotationDrag.startAngle !== undefined) {
+        const angle = Math.atan2(world.y - annotationDrag.center.y, world.x - annotationDrag.center.x) * 180 / Math.PI;
+        setPreviewAnnotation({
+          ...annotationDrag.original,
+          rotation: normalizeAngle((annotationDrag.original.rotation ?? 0) + angle - annotationDrag.startAngle),
+        });
+      } else if (annotationDrag.mode === "move") setPreviewAnnotation({
         ...annotationDrag.original,
         position: {
           x: annotationDrag.original.position.x + delta.x,
           y: annotationDrag.original.position.y + delta.y,
         },
-      } : {
-        ...annotationDrag.original,
-        width: Math.max(10, annotationDrag.original.width + delta.x),
-        height: Math.max(10, annotationDrag.original.height + delta.y),
       });
+      else {
+        const radians = -(annotationDrag.original.rotation ?? 0) * Math.PI / 180;
+        const localDelta = {
+          x: rawDelta.x * Math.cos(radians) - rawDelta.y * Math.sin(radians),
+          y: rawDelta.x * Math.sin(radians) + rawDelta.y * Math.cos(radians),
+        };
+        setPreviewAnnotation({
+          ...annotationDrag.original,
+          width: Math.max(10, annotationDrag.original.width + snap(localDelta.x)),
+          height: Math.max(10, annotationDrag.original.height + snap(localDelta.y)),
+        });
+      }
     }
     if (componentScaleDrag) {
       const distance = Math.max(1, Math.hypot(world.x - componentScaleDrag.center.x, world.y - componentScaleDrag.center.y));
@@ -445,7 +463,9 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     if (annotationDrag && previewAnnotation && event.type !== "pointercancel") {
       onUpdateAnnotation(annotationDrag.annotationId, annotationDrag.mode === "move"
         ? { position: previewAnnotation.position }
-        : { width: previewAnnotation.width, height: previewAnnotation.height });
+        : annotationDrag.mode === "rotate"
+          ? { rotation: previewAnnotation.rotation }
+          : { width: previewAnnotation.width, height: previewAnnotation.height });
     }
     if (annotationDrag && svgRef.current?.hasPointerCapture?.(annotationDrag.pointerId)) {
       svgRef.current.releasePointerCapture?.(annotationDrag.pointerId);
@@ -651,7 +671,17 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [] });
     onSelectAnnotation(annotation.id);
     svgRef.current?.setPointerCapture?.(event.pointerId);
-    setAnnotationDrag({ annotationId: annotation.id, mode, pointerStart: toWorld(event.clientX, event.clientY), original: annotation, pointerId: event.pointerId });
+    const pointerStart = toWorld(event.clientX, event.clientY);
+    const center = { x: annotation.position.x + annotation.width / 2, y: annotation.position.y + annotation.height / 2 };
+    setAnnotationDrag({
+      annotationId: annotation.id,
+      mode,
+      pointerStart,
+      original: annotation,
+      pointerId: event.pointerId,
+      center: mode === "rotate" ? center : undefined,
+      startAngle: mode === "rotate" ? Math.atan2(pointerStart.y - center.y, pointerStart.x - center.x) * 180 / Math.PI : undefined,
+    });
     setPreviewAnnotation(annotation);
   };
 
@@ -755,9 +785,15 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             return <g key={cableRun.id}>
               {geometry.connections.map((item) => {
                 const connection = visibleHarness.connections.find((candidate) => candidate.id === item.connectionId)!;
+                const color = splitWireColor(connection.color);
+                const fromPath = orthogonalPath(item.from, geometry.fromJunction);
+                const toPath = orthogonalPath(geometry.toJunction, item.to);
                 return <g key={item.connectionId}>
-                  <path className="hd2-cable-core" d={orthogonalPath(item.from, geometry.fromJunction)} style={{ stroke: wireColor(connection.color) }} />
-                  <path className="hd2-cable-core" d={orthogonalPath(geometry.toJunction, item.to)} style={{ stroke: wireColor(connection.color) }} />
+                  <path className="hd2-cable-core" d={fromPath} style={{ stroke: wireColorValue(color.primary) }} />
+                  <path className="hd2-cable-core" d={toPath} style={{ stroke: wireColorValue(color.primary) }} />
+                  {color.secondary && <><path className="hd2-cable-core-stripe" d={fromPath} style={{ stroke: wireColorValue(color.secondary) }} /><path className="hd2-cable-core-stripe" d={toPath} style={{ stroke: wireColorValue(color.secondary) }} /></>}
+                  <StrippedConductor endpoint={connection.from} adjacent={geometry.fromJunction} />
+                  <StrippedConductor endpoint={connection.to} adjacent={geometry.toJunction} />
                 </g>;
               })}
               <path className="hd2-cable-hit" d={jacketPath} aria-label={`${cableRun.reference} 외피`} onPointerDown={(event) => {
@@ -821,12 +857,16 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
               : savedRoutePoint;
             const handlePoint = routePoint ?? defaultRoutePoint(from, to);
             const path = routedPath(from, to, routePoint);
+            const color = splitWireColor(connection.color);
             return <g key={connection.id}>
               <path className="hd2-wire-hit" d={path} aria-label={`${connection.reference} 전선`} onPointerDown={(event) => {
                 event.stopPropagation();
                 onSelectionChange({ componentIds: [], connectionIds: [connection.id], cableRunIds: [] });
               }} />
-              <path className={`hd2-wire${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColor(connection.color) }} />
+              <path className={`hd2-wire${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColorValue(color.primary) }} />
+              {color.secondary && <path className={`hd2-wire-stripe${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColorValue(color.secondary) }} />}
+              <StrippedConductor endpoint={connection.from} adjacent={routePoint ?? to} />
+              <StrippedConductor endpoint={connection.to} adjacent={routePoint ?? from} />
               <text className="hd2-wire-label" x={handlePoint.x} y={handlePoint.y - 7}>{connection.reference}</text>
               {selected && <circle
                 className="hd2-route-handle"
@@ -963,7 +1003,8 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
                     onCommit={(reference) => onRenameConnection(row.connectionId, reference)}
                   />
                 </foreignObject>
-                <circle cx="180" cy="8" r="4" style={{ fill: wireColor(row.color) }} />
+                <circle cx="180" cy="8" r="4" style={{ fill: wireColorValue(splitWireColor(row.color).primary) }} />
+                {splitWireColor(row.color).secondary && <path d="M180 4 A4 4 0 0 1 180 12 Z" style={{ fill: wireColorValue(splitWireColor(row.color).secondary) }} />}
               </g>)}
             </g>}
           </g>;
@@ -1000,13 +1041,14 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             selected={selected}
             onMove={(event) => beginAnnotationDrag(event, annotation, "move")}
             onResize={(event) => beginAnnotationDrag(event, annotation, "resize")}
+            onRotate={(event) => beginAnnotationDrag(event, annotation, "rotate")}
           />;
         })}
       </g>
     </svg>
     {harness.components.length === 0 && (harness.drawing.annotations?.length ?? 0) === 0 && <div className="hd2-empty-canvas">
       <strong>빈 2D 도면</strong>
-      <span>상단의 커넥터 추가 버튼으로 시작하세요.</span>
+      <span>상단의 부품 추가 버튼으로 시작하세요.</span>
     </div>}
   </div>;
 }
@@ -1064,17 +1106,22 @@ function HeatShrinkPathText({ heatShrink, path, center, onSelect, onCommit }: {
   </>;
 }
 
-function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
+function DrawingAnnotation({ annotation, selected, onMove, onResize, onRotate }: {
   annotation: DrawingAnnotation2D;
   selected: boolean;
   onMove: (event: ReactPointerEvent<SVGGElement>) => void;
   onResize: (event: ReactPointerEvent<SVGRectElement>) => void;
+  onRotate: (event: ReactPointerEvent<SVGCircleElement>) => void;
 }) {
   const { x, y } = annotation.position;
   const label = annotation.text || annotation.kind;
+  const rotation = annotation.rotation ?? 0;
+  const center = { x: annotation.width / 2, y: annotation.height / 2 };
+  const rotationRadius = Math.hypot(annotation.width, annotation.height) / 2 + 14;
+  const maskId = `hd2-step-mask-${annotation.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   return <g
     className={`hd2-annotation hd2-annotation--${annotation.kind}${selected ? " is-selected" : ""}`}
-    transform={`translate(${x} ${y})`}
+    transform={rotation === 0 ? `translate(${x} ${y})` : `translate(${x} ${y}) rotate(${rotation} ${center.x} ${center.y})`}
     aria-label={`${label} 주석`}
     onPointerDown={onMove}
   >
@@ -1087,6 +1134,16 @@ function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
     {annotation.kind === "rectangle" && <rect width={annotation.width} height={annotation.height} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
     {annotation.kind === "ellipse" && <ellipse cx={annotation.width / 2} cy={annotation.height / 2} rx={annotation.width / 2} ry={annotation.height / 2} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
     {annotation.kind === "image" && annotation.imageDataUrl && <image href={annotation.imageDataUrl} width={annotation.width} height={annotation.height} preserveAspectRatio="xMidYMid meet" />}
+    {annotation.kind === "step" && annotation.drawing && <svg width={annotation.width} height={annotation.height} viewBox={`0 0 ${annotation.drawing.widthMm} ${annotation.drawing.heightMm}`} preserveAspectRatio="none">
+      {annotation.drawing.imageDataUrl && <>
+        <defs><mask id={maskId}><image href={annotation.drawing.imageDataUrl} width={annotation.drawing.widthMm} height={annotation.drawing.heightMm} preserveAspectRatio="none" /></mask></defs>
+        <image href={annotation.drawing.imageDataUrl} width={annotation.drawing.widthMm} height={annotation.drawing.heightMm} preserveAspectRatio="none" />
+        {annotation.tintColor && <rect width={annotation.drawing.widthMm} height={annotation.drawing.heightMm} fill={annotation.tintColor} opacity="0.48" mask={`url(#${maskId})`} />}
+      </>}
+      <g className="hd2-step-annotation-paths" style={{ stroke: annotation.tintColor || annotation.strokeColor, strokeWidth: partDrawingStrokeWidth(annotation.drawing.outlineStrength) }}>
+        {annotation.drawing.paths.map((path, index) => <path key={index} d={drawingPathData(path)} />)}
+      </g>
+    </svg>}
     {selected && <>
       <rect className="hd2-annotation-selection" x="-3" y="-3" width={annotation.width + 6} height={annotation.height + 6} />
       <rect
@@ -1098,8 +1155,24 @@ function DrawingAnnotation({ annotation, selected, onMove, onResize }: {
         aria-label={`${label} 크기 조정`}
         onPointerDown={(event) => onResize(event)}
       />
+      {annotation.kind === "step" && <g className="hd2-annotation-rotation-guide">
+        <circle cx={center.x} cy={center.y} r={rotationRadius} />
+        <line x1={center.x} y1={center.y} x2={center.x} y2={center.y - rotationRadius} />
+        <circle
+          className="hd2-annotation-rotate"
+          cx={center.x}
+          cy={center.y - rotationRadius}
+          r="7"
+          aria-label={`${label} 회전`}
+          onPointerDown={(event) => onRotate(event)}
+        />
+      </g>}
     </>}
   </g>;
+}
+
+function normalizeAngle(value: number) {
+  return Math.round(((((value % 360) + 360) % 360)) * 10) / 10;
 }
 
 function connectorLabelOffset(connector: Connector2D, placement: ComponentPlacement2D, label: ConnectorLabelKind): Point2D {
@@ -1119,6 +1192,13 @@ function connectorPinMapRows(harness: Harness2D, componentId: string) {
     const toThisPin = connection.to.componentId === componentId && connection.to.pinId === pin.id;
     if (!fromThisPin && !toThisPin) return [];
     const otherEndpoint = fromThisPin ? connection.to : connection.from;
+    if (otherEndpoint.freeEnd) return [{
+      connectionId: connection.id,
+      pinNumber: pin.number,
+      target: `탈피 ${otherEndpoint.freeEnd.stripLengthMm} mm`,
+      reference: connection.reference,
+      color: connection.color,
+    }];
     const otherConnector = harness.components.find((item) => item.id === otherEndpoint.componentId);
     const otherPin = otherConnector?.pins.find((item) => item.id === otherEndpoint.pinId);
     return [{
@@ -1129,6 +1209,22 @@ function connectorPinMapRows(harness: Harness2D, componentId: string) {
       color: connection.color,
     }];
   }));
+}
+
+function StrippedConductor({ endpoint, adjacent }: { endpoint: PinEndpoint2D; adjacent: Point2D }) {
+  if (!endpoint.freeEnd || endpoint.freeEnd.stripLengthMm <= 0) return null;
+  const start = endpoint.freeEnd.position;
+  const distance = Math.hypot(adjacent.x - start.x, adjacent.y - start.y);
+  if (distance === 0) return null;
+  const length = Math.min(endpoint.freeEnd.stripLengthMm, distance);
+  const end = {
+    x: start.x + ((adjacent.x - start.x) / distance) * length,
+    y: start.y + ((adjacent.y - start.y) / distance) * length,
+  };
+  return <g className="hd2-stripped-end">
+    <path d={`M ${start.x} ${start.y} L ${end.x} ${end.y}`} />
+    <circle cx={start.x} cy={start.y} r="2" />
+  </g>;
 }
 
 function PinMapWireName({ value, ariaLabel, onCommit }: { value: string; ariaLabel: string; onCommit: (value: string) => void }) {
@@ -1284,14 +1380,6 @@ function displayRulerValue(millimeters: number, unit: Settings2D["lengthUnit"]) 
   const value = unit === "in" ? millimeters / 25.4 : millimeters;
   const rounded = Math.abs(value) < 0.0001 ? 0 : value;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function wireColor(code: string) {
-  const colors: Record<string, string> = {
-    BK: "#20262c", RD: "#d73c3c", BU: "#2c7ec8", GN: "#28965a", WH: "#cbd3da",
-    YE: "#d9a514", OR: "#e87924", BN: "#7a4d2c", VT: "#7557a6", GY: "#788590",
-  };
-  return colors[code.toUpperCase()] ?? "#176b9b";
 }
 
 function isEditingElement(target: EventTarget | null) {

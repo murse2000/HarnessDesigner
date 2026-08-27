@@ -13,10 +13,11 @@ type ViewBox2D = Rectangle2D;
 type ParsedSource2D = ParsedDxf2D | ParsedRaster2D;
 const DEFAULT_SYMBOL_MAX_SIZE = 40;
 
-export function PartSymbolEditor({ draft, onApply, onClose }: {
+export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: {
   draft: LibraryPartDraft2D;
   onApply: (draft: LibraryPartDraft2D) => void;
   onClose: () => void;
+  purpose?: "part" | "drawing";
 }) {
   const initial = useMemo(() => existingDrawingAsParsed(draft), []);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -43,6 +44,7 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
   const [stepSurfaceColors, setStepSurfaceColors] = useState<Record<string, string>>(initial.stepSurfaceColors);
   const [activeStepSurface, setActiveStepSurface] = useState(0);
   const [outlineStrength, setOutlineStrength] = useState(draft.drawing ? draft.drawing.outlineStrength ?? 1 : 1.6);
+  const [stepLoading, setStepLoading] = useState(Boolean(initial.stepAsset?.sourceDataBase64 && initial.stepAsset.meshes.length === 0));
   const [error, setError] = useState("");
 
   const currentSelection = selectionStart && selection
@@ -54,7 +56,7 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
     const padded = padBounds(loaded.bounds, 0.035);
     setParsed(loaded);
     setViewBox(padded);
-    setSelection(null);
+    setSelection(purpose === "drawing" ? { ...loaded.bounds } : null);
     setSelectionStart(null);
     setPinPoints(Array.from({ length: draft.pins.length }, () => null));
     setPinDirections(defaultDirections(draft.pins.length));
@@ -121,6 +123,26 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
   };
 
   useEffect(() => {
+    const savedAsset = initial.stepAsset;
+    if (!savedAsset?.sourceDataBase64 || savedAsset.meshes.length > 0) return;
+    let cancelled = false;
+    void importStepAsset(base64ToBytes(savedAsset.sourceDataBase64), savedAsset.sourceName)
+      .then((loaded) => {
+        if (cancelled) return;
+        const hydrated = { ...loaded, id: savedAsset.id };
+        setStepAsset(hydrated);
+        setParsed(projectStepDrawing(hydrated, initial.stepRotation));
+        setStepLoading(false);
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        setStepLoading(false);
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       const file = Array.from(event.clipboardData?.items ?? [])
         .find((item) => item.type.startsWith("image/"))?.getAsFile();
@@ -147,6 +169,7 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
 
   const onPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0 || !parsed) return;
+    event.currentTarget.focus();
     if (mode === "rotate" && stepAsset) {
       event.currentTarget.setPointerCapture(event.pointerId);
       stepDragRef.current = {
@@ -282,7 +305,7 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
             viewBox: { ...viewBox },
             pinPoints: pinPoints.map((point) => point ? { ...point } : null),
             stepRotation: stepAsset ? { ...stepRotation } : undefined,
-            stepAsset: stepAsset ? { ...cloneStepAsset(stepAsset), sourceDataBase64: "" } : undefined,
+            stepAsset: stepAsset ? compactStepAsset(stepAsset) : undefined,
             stepRenderMode: stepAsset ? stepRenderMode : undefined,
             stepSurfaceColors: stepAsset ? { ...stepSurfaceColors } : undefined,
           },
@@ -293,10 +316,22 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
     }
   };
 
+  const rotateStepQuarterTurn = () => {
+    if (!stepAsset) return;
+    updateStepRotation("z", stepRotation.z + 90);
+  };
+
+  const guideCenter = parsed ? {
+    x: parsed.bounds.x + parsed.bounds.width / 2,
+    y: parsed.bounds.y + parsed.bounds.height / 2,
+  } : null;
+  const guideRadius = parsed ? Math.max(parsed.bounds.width, parsed.bounds.height) * 0.58 : 0;
+  const editorTitle = purpose === "drawing" ? "STEP 도면 객체 편집기" : "커넥터 2D 심벌 편집기";
+
   return <div className="hd2-dialog-backdrop hd2-symbol-editor-backdrop">
-    <section className="hd2-symbol-editor" role="dialog" aria-label="커넥터 2D 심벌 편집기">
+    <section className="hd2-symbol-editor" role="dialog" aria-label={editorTitle}>
       <header>
-        <div><strong>커넥터 2D 심벌 편집기</strong><span>DXF·이미지 또는 STEP 투영에서 필요한 투상도와 핀 접속점을 지정합니다.</span></div>
+        <div><strong>{editorTitle}</strong><span>{purpose === "drawing" ? draft.drawing ? "저장된 STEP 각도와 표면 색상을 수정해 같은 객체에 적용합니다." : "STEP 각도와 표면 색상을 정한 뒤 투영 객체를 도면에 추가합니다." : "DXF·이미지 또는 STEP 투영에서 필요한 투상도와 핀 접속점을 지정합니다."}</span></div>
         <button type="button" onClick={() => drawingInputRef.current?.click()}><FileUp size={14} />도면 / STEP 열기</button>
         <button type="button" onClick={() => void pasteClipboardImage()}><ClipboardPaste size={14} />클립보드 이미지</button>
         <input ref={drawingInputRef} className="hd2-symbol-file-input" type="file" accept=".dxf,.png,.jpg,.jpeg,.webp,.step,.stp,image/png,image/jpeg,image/webp" onChange={(event) => void importDrawing(event.target.files?.[0])} />
@@ -304,10 +339,11 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
       </header>
       <div className="hd2-symbol-toolbar">
         {stepAsset && <button type="button" className={mode === "rotate" ? "is-selected" : ""} onClick={() => setMode("rotate")}><Rotate3D size={14} />마우스 회전</button>}
+        {stepAsset && <button type="button" onClick={rotateStepQuarterTurn} title="Z축으로 90° 회전 (R)">R · 90°</button>}
         {stepAsset && <button type="button" className={mode === "color" ? "is-selected" : ""} onClick={() => { setStepRenderMode("shaded"); setMode("color"); }}><Palette size={14} />표면 색상</button>}
         <button type="button" className={mode === "select" ? "is-selected" : ""} onClick={() => setMode("select")}><MousePointer2 size={14} />영역 선택</button>
-        <button type="button" className={mode === "pins" ? "is-selected" : ""} onClick={() => setMode("pins")}><Focus size={14} />핀 배치</button>
-        <button type="button" onClick={autoPlacePins}>핀 자동 배치</button>
+        {purpose === "part" && <button type="button" className={mode === "pins" ? "is-selected" : ""} onClick={() => setMode("pins")}><Focus size={14} />핀 배치</button>}
+        {purpose === "part" && <button type="button" onClick={autoPlacePins}>핀 자동 배치</button>}
         <button type="button" onClick={() => parsed && setViewBox(padBounds(parsed.bounds, 0.035))}>전체 보기</button>
         {stepAsset && <div className="hd2-symbol-step-rotation"><b>STEP 각도</b>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input aria-label={`STEP ${axis.toUpperCase()} 회전`} type="number" step="5" value={stepRotation[axis]} onChange={(event) => updateStepRotation(axis, Number(event.target.value))} /><em>°</em></label>)}</div>}
         {stepAsset && <div className="hd2-symbol-render-mode"><b>표현</b><button type="button" className={stepRenderMode === "shaded" ? "is-selected" : ""} onClick={() => setStepRenderMode("shaded")}>음영</button><button type="button" className={stepRenderMode === "technical" ? "is-selected" : ""} onClick={() => setStepRenderMode("technical")}>기술도면</button></div>}
@@ -325,6 +361,12 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onWheel={onWheel}
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key.toLowerCase() !== "r" || !stepAsset) return;
+              event.preventDefault();
+              rotateStepQuarterTurn();
+            }}
           >
             <rect className="hd2-symbol-background" x={viewBox.x} y={viewBox.y} width={viewBox.width} height={viewBox.height} />
             {isParsedRaster(parsed) && <image className="hd2-symbol-pdf-page" href={parsed.imageDataUrl} x={parsed.bounds.x} y={parsed.bounds.y} width={parsed.bounds.width} height={parsed.bounds.height} />}
@@ -345,6 +387,12 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
             <g className={`hd2-symbol-source${stepAsset ? " is-step-source" : ""}`} style={{ strokeWidth: partDrawingStrokeWidth(outlineStrength) }}>
               {parsed.paths.map((path, index) => <path key={index} d={drawingPathData(path)} />)}
             </g>
+            {stepAsset && mode === "rotate" && guideCenter && <g className="hd2-step-rotation-guide" aria-label="STEP 회전 가이드">
+              <circle cx={guideCenter.x} cy={guideCenter.y} r={guideRadius} />
+              <line x1={guideCenter.x - guideRadius} y1={guideCenter.y} x2={guideCenter.x + guideRadius} y2={guideCenter.y} />
+              <line x1={guideCenter.x} y1={guideCenter.y - guideRadius} x2={guideCenter.x} y2={guideCenter.y + guideRadius} />
+              <circle className="hd2-step-rotation-guide-center" cx={guideCenter.x} cy={guideCenter.y} r={strokeWidth * 4} />
+            </g>}
             {currentSelection && <rect className="hd2-symbol-selection" {...currentSelection} style={{ strokeWidth: strokeWidth * 1.5 }} />}
             {pinPoints.map((point, index) => point && <g key={index} className={`hd2-symbol-pin${activePin === index ? " is-active" : ""}`}>
               <line x1={point.x} y1={point.y} x2={point.x + pinDirections[index].directionX * strokeWidth * 18} y2={point.y + pinDirections[index].directionY * strokeWidth * 18} style={{ strokeWidth: strokeWidth * 2 }} />
@@ -356,13 +404,13 @@ export function PartSymbolEditor({ draft, onApply, onClose }: {
         </div>
         <aside>
           <section><h3>1. 투상도 영역</h3><p>필요한 커넥터 투상도를 사각형으로 감싸세요. 도면 테두리와 표는 영역 밖으로 제외합니다.</p>{selection && <dl><dt>원본 폭</dt><dd>{Math.abs(selection.width).toFixed(3)}</dd><dt>원본 높이</dt><dd>{Math.abs(selection.height).toFixed(3)}</dd></dl>}</section>
-          <section><h3>2. 핀 접속점 · {pinPoints.filter(Boolean).length}/{draft.pins.length}</h3><p>핀 배치 모드에서 도면을 클릭하거나 핸들을 드래그하세요.</p><div className="hd2-symbol-pin-list">{draft.pins.map((pin, index) => <button type="button" key={index} className={activePin === index ? "is-selected" : ""} onClick={() => { setMode("pins"); setActivePin(index); }}><b>{pin.number}</b><span>{pin.name}</span><em>{pinPoints[index] ? "배치됨" : "미배치"}</em></button>)}</div><label><span>선 인출 방향</span><select value={directionName(pinDirections[activePin])} onChange={(event) => setPinDirections((current) => current.map((item, index) => index === activePin ? directionFromName(event.target.value) : item))}><option value="right">오른쪽</option><option value="left">왼쪽</option><option value="up">위쪽</option><option value="down">아래쪽</option></select></label></section>
+          {purpose === "part" && <section><h3>2. 핀 접속점 · {pinPoints.filter(Boolean).length}/{draft.pins.length}</h3><p>핀 배치 모드에서 도면을 클릭하거나 핸들을 드래그하세요.</p><div className="hd2-symbol-pin-list">{draft.pins.map((pin, index) => <button type="button" key={index} className={activePin === index ? "is-selected" : ""} onClick={() => { setMode("pins"); setActivePin(index); }}><b>{pin.number}</b><span>{pin.name}</span><em>{pinPoints[index] ? "배치됨" : "미배치"}</em></button>)}</div>{draft.pins[activePin] && <label><span>선 인출 방향</span><select value={directionName(pinDirections[activePin])} onChange={(event) => setPinDirections((current) => current.map((item, index) => index === activePin ? directionFromName(event.target.value) : item))}><option value="right">오른쪽</option><option value="left">왼쪽</option><option value="up">위쪽</option><option value="down">아래쪽</option></select></label>}</section>}
           {stepAsset && <section><h3>3. STEP 표면 색상</h3><p>표면 색상 모드에서 커넥터 면을 클릭한 뒤 색상을 지정하세요.</p><label><span>선택 영역</span><select aria-label="STEP 표면 영역" value={activeStepSurface} onChange={(event) => setActiveStepSurface(Number(event.target.value))}>{stepAsset.meshes.map((mesh, index) => <option key={index} value={index}>{mesh.name || `영역 ${index + 1}`}</option>)}</select></label><label><span>표면 색상</span><input aria-label="STEP 표면 색상" type="color" value={stepSurfaceColors[String(activeStepSurface)] ?? stepSurfaceDefaultColor(stepAsset, activeStepSurface)} onChange={(event) => updateStepSurfaceColor(event.target.value)} /></label></section>}
           {parsed && parsed.unsupported.length > 0 && <section className="hd2-symbol-warning"><h3>제외·근사 형상</h3><p>묵시적으로 삭제하지 않고 결과에 기록합니다.</p><ul>{parsed.unsupported.map((item) => <li key={item.type}>{item.type} · {item.count}</li>)}</ul></section>}
         </aside>
       </div>
       {error && <div className="hd2-library-error">{error}</div>}
-      <footer><button type="button" onClick={() => onApply({ ...draft, drawing: undefined, pins: draft.pins.map((pin) => ({ ...pin, anchor: undefined })) })}><Trash2 size={14} />등록 도면 제거</button><span>{selection ? "도면 배치 후 크기 조절 핸들로 표시 배율을 지정합니다." : "추출 영역을 선택하세요."}</span><button type="button" onClick={onClose}>취소</button><button type="button" className="is-primary" onClick={() => void apply()}>심벌 적용</button></footer>
+      <footer>{purpose === "part" && <button type="button" onClick={() => onApply({ ...draft, drawing: undefined, pins: draft.pins.map((pin) => ({ ...pin, anchor: undefined })) })}><Trash2 size={14} />등록 도면 제거</button>}<span>{stepLoading ? "저장된 STEP 원본을 불러오는 중입니다." : selection ? "도면 배치 후 크기 조절 핸들로 표시 배율을 지정합니다." : "추출 영역을 선택하세요."}</span><button type="button" onClick={onClose}>취소</button><button type="button" className="is-primary" disabled={stepLoading} onClick={() => void apply()}>{purpose === "drawing" ? draft.drawing ? "도면 수정 적용" : "도면에 추가" : "심벌 적용"}</button></footer>
     </section>
   </div>;
 }
@@ -408,7 +456,9 @@ function existingDrawingAsParsed(draft: LibraryPartDraft2D) {
     const stepAsset = saved.stepAsset ? cloneStepAsset(saved.stepAsset) : null;
     const stepRotation = saved.stepRotation ? { ...saved.stepRotation } : { x: 0, y: 0, z: 0 };
     return {
-      parsed: stepAsset ? projectStepDrawing(stepAsset, stepRotation) : cloneSavedSource(saved.source),
+      parsed: stepAsset && (stepAsset.meshes.length > 0 || !stepAsset.sourceDataBase64)
+        ? projectStepDrawing(stepAsset, stepRotation)
+        : cloneSavedSource(saved.source),
       selection: { ...saved.selection },
       viewBox: { ...saved.viewBox },
       pinPoints: draft.pins.map((_, index) => saved.pinPoints[index] ? { ...saved.pinPoints[index]! } : null),
@@ -486,6 +536,15 @@ function cloneStepAsset(asset: ModelAsset): ModelAsset {
       indices: [...mesh.indices],
     })),
   };
+}
+
+function compactStepAsset(asset: ModelAsset): ModelAsset {
+  return { ...asset, meshes: [] };
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function isParsedRaster(parsed: ParsedSource2D): parsed is ParsedRaster2D {

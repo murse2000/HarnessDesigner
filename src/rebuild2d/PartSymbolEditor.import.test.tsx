@@ -70,6 +70,40 @@ describe("부품 심벌 도면 입력", () => {
     expect(stepRotationFromDrag({ x: 10, y: 20, z: 30 }, 50, 80, true)).toEqual({ x: 10, y: 20, z: 50 });
   });
 
+  it("메인 도면용 STEP에 회전 가이드를 표시하고 R 키로 90도 회전한다", async () => {
+    const onApply = vi.fn();
+    stepMocks.importStepAsset.mockResolvedValue({
+      id: "step",
+      name: "part",
+      sourceFormat: "step",
+      sourceName: "part.step",
+      sourceDataBase64: "AQ==",
+      meshes: [{ name: "Body", positions: [0, 0, 0], indices: [0] }],
+    });
+    stepMocks.projectStepDrawing.mockImplementation(() => ({
+      sourceName: "part.step · STEP 투영",
+      bounds: { x: 0, y: 0, width: 100, height: 80 },
+      paths: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 80 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+      surfaces: [],
+      unsupported: [],
+    }));
+    const drawingDraft = { ...draft, pins: [] };
+    const { container } = render(<PartSymbolEditor draft={drawingDraft} purpose="drawing" onApply={onApply} onClose={() => {}} />);
+    const file = new File([new Uint8Array([1])], "part.step");
+    Object.defineProperty(file, "arrayBuffer", { value: async () => new Uint8Array([1]).buffer });
+
+    fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [file] } });
+    expect(await screen.findByLabelText("STEP 회전 가이드")).toBeInTheDocument();
+    const canvas = container.querySelector<SVGSVGElement>(".hd2-symbol-canvas > svg")!;
+    fireEvent.keyDown(canvas, { key: "r" });
+    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 0, y: 0, z: 90 }));
+    fireEvent.click(screen.getByRole("button", { name: "도면에 추가" }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalled());
+    expect(onApply.mock.calls[0][0].drawing.editorState.selection).toEqual({ x: 0, y: 0, width: 100, height: 80 });
+    expect(onApply.mock.calls[0][0].drawing.editorState.stepAsset).toMatchObject({ sourceDataBase64: "AQ==", meshes: [] });
+  });
+
   it("STEP 회전 중 사용자가 확대한 뷰포인트를 유지한다", async () => {
     stepMocks.importStepAsset.mockResolvedValue({ id: "step", name: "part", sourceFormat: "step", sourceName: "part.step", sourceDataBase64: "", meshes: [] });
     stepMocks.projectStepDrawing.mockImplementation((_asset, rotation: { y: number }) => ({

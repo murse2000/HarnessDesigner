@@ -100,7 +100,7 @@ export function extractStepShadedPartDrawing(
 export function preferStepShadedDrawing(drawing: PartDrawing2D): PartDrawing2D {
   const state = drawing.editorState;
   const asset = state?.stepAsset;
-  if (!state || !asset) return drawing;
+  if (!state || !asset || asset.meshes.length === 0) return drawing;
   const selection = normalizeRectangle(state.selection);
   const symbolScale = drawing.widthMm / selection.width;
   return {

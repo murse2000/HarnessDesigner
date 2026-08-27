@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCableHeatShrink, addCableRun, addConnector, addDrawingAnnotation, addHarness, addWireRun, connectPins, copyHarness, copyHarnessDrawing, createEmptyProject, deleteCableHeatShrink, deleteDrawingAnnotation, deleteHarness, deleteItems, moveComponent, moveItems, pasteHarness, pasteHarnessDrawing, reorderHarness, setCableRunBreakout, setCableRunLabelOffset, setCableRunRoute, setComponentDisplayScale, setComponentLabelPlacement, setComponentPinMapOffset, setComponentRotation, setConnectionRoute, updateCableHeatShrink, updateDrawingAnnotation, updateDrawingTitleBlock } from "./model";
+import { addCableHeatShrink, addCableRun, addConnector, addDrawingAnnotation, addHarness, addHarnessFolder, addWireRun, applyDrawingMetadataToAllHarnesses, connectPins, copyHarness, copyHarnessDrawing, createEmptyProject, deleteCableHeatShrink, deleteDrawingAnnotation, deleteHarness, deleteHarnessFolder, deleteItems, moveComponent, moveItems, moveProjectTreeItem, pasteHarness, pasteHarnessDrawing, projectTreeNodes, renameHarnessFolder, reorderHarness, setCableRunBreakout, setCableRunLabelOffset, setCableRunRoute, setComponentDisplayScale, setComponentLabelPlacement, setComponentPinMapOffset, setComponentRotation, setConnectionRoute, updateCableHeatShrink, updateDrawingAnnotation, updateDrawingTitleBlock, updateHarnessMetadata } from "./model";
 
 describe("새 2D 프로젝트 모델", () => {
   it("샘플 부품 없이 빈 하네스로 시작한다", () => {
@@ -21,6 +21,23 @@ describe("새 2D 프로젝트 모델", () => {
     expect(second.project.harnesses.map((harness) => harness.partNumber)).toEqual(["HNS-001", "HNS-002", "HNS-003"]);
     expect(second.project.harnesses[2]).toMatchObject({ id: second.harnessId, name: "새 하네스", revision: "A", components: [], connections: [], cableRuns: [] });
     expect(second.project.harnesses[2].drawing.titleBlock?.drawingTitle).toBe("HARNESS ASSEMBLY DRAWING");
+  });
+
+  it("현재 도면의 공통 정보를 전체 하네스와 새 하네스에 재사용한다", () => {
+    let project = createEmptyProject();
+    const sourceId = project.harnesses[0].id;
+    project = updateHarnessMetadata(project, sourceId, { revision: "B" });
+    project = updateDrawingTitleBlock(project, sourceId, { createdDate: "2026-08-28", createdBy: "작성자", reviewedBy: "검토자", approvedBy: "승인자" });
+    project = addHarness(project).project;
+
+    project = applyDrawingMetadataToAllHarnesses(project, sourceId);
+    expect(project.harnesses).toHaveLength(2);
+    expect(project.harnesses.every((harness) => harness.revision === "B")).toBe(true);
+    expect(project.harnesses.every((harness) => harness.drawing.titleBlock?.createdBy === "작성자")).toBe(true);
+
+    const added = addHarness(project, null, sourceId);
+    expect(added.project.harnesses[2]).toMatchObject({ revision: "B" });
+    expect(added.project.harnesses[2].drawing.titleBlock).toMatchObject({ createdDate: "2026-08-28", createdBy: "작성자", reviewedBy: "검토자", approvedBy: "승인자" });
   });
 
   it("선택한 하네스를 삭제하되 마지막 하네스는 유지한다", () => {
@@ -45,6 +62,32 @@ describe("새 2D 프로젝트 모델", () => {
     expect(JSON.parse(JSON.stringify(movedLast)).harnesses.map((harness: { partNumber: string }) => harness.partNumber)).toEqual(["HNS-001", "HNS-002", "HNS-003"]);
   });
 
+  it("폴더와 하위 폴더를 만들고 하네스를 마우스 이동용 트리 순서로 배치한다", () => {
+    const rootFolder = addHarnessFolder(createEmptyProject());
+    const childFolder = addHarnessFolder(rootFolder.project, rootFolder.folderId);
+    const added = addHarness(childFolder.project);
+    const moved = moveProjectTreeItem(added.project, added.harnessId, childFolder.folderId, "inside");
+
+    expect(projectTreeNodes(moved)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: rootFolder.folderId, kind: "folder", parentId: null }),
+      expect.objectContaining({ id: childFolder.folderId, kind: "folder", parentId: rootFolder.folderId }),
+      expect.objectContaining({ harnessId: added.harnessId, kind: "harness", parentId: childFolder.folderId }),
+    ]));
+    expect(moveProjectTreeItem(moved, rootFolder.folderId, childFolder.folderId, "inside")).toBe(moved);
+  });
+
+  it("폴더 이름을 수정하고 삭제 시 내부 항목을 상위 폴더로 이동한다", () => {
+    const folder = addHarnessFolder(createEmptyProject());
+    const added = addHarness(folder.project, folder.folderId);
+    const renamed = renameHarnessFolder(added.project, folder.folderId, "제어반");
+    const deleted = deleteHarnessFolder(renamed, folder.folderId);
+
+    expect(projectTreeNodes(renamed)).toContainEqual(expect.objectContaining({ id: folder.folderId, name: "제어반" }));
+    expect(projectTreeNodes(deleted)).not.toContainEqual(expect.objectContaining({ id: folder.folderId }));
+    expect(projectTreeNodes(deleted)).toContainEqual(expect.objectContaining({ harnessId: added.harnessId, parentId: null }));
+    expect(deleted.harnesses).toHaveLength(2);
+  });
+
   it("도면 제목란과 주석을 저장하고 수정 및 삭제한다", () => {
     let project = createEmptyProject();
     const harnessId = project.harnesses[0].id;
@@ -63,6 +106,33 @@ describe("새 2D 프로젝트 모델", () => {
 
     project = deleteDrawingAnnotation(project, harnessId, added.annotationId);
     expect(project.harnesses[0].drawing.annotations).toEqual([]);
+  });
+
+  it("메인 도면의 STEP 투영 객체와 회전, 색상을 저장한다", () => {
+    const project = createEmptyProject();
+    const harnessId = project.harnesses[0].id;
+    const drawing = {
+      sourceName: "fixture.step · STEP 투영",
+      widthMm: 40,
+      heightMm: 20,
+      paths: [{ points: [{ x: 0, y: 0 }, { x: 40, y: 20 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
+      unsupportedEntities: [],
+    };
+    const added = addDrawingAnnotation(project, harnessId, {
+      kind: "step",
+      position: { x: 120, y: 90 },
+      drawing,
+      rotation: 90,
+      tintColor: "#ff6600",
+    });
+
+    expect(added.project.harnesses[0].drawing.annotations?.[0]).toMatchObject({
+      kind: "step",
+      drawing: { sourceName: "fixture.step · STEP 투영" },
+      rotation: 90,
+      tintColor: "#ff6600",
+    });
+    expect(JSON.parse(JSON.stringify(added.project)).harnesses[0].drawing.annotations[0].drawing.paths).toHaveLength(1);
   });
 
   it("하네스 전체 복사 시 제목란과 주석을 독립 복제한다", () => {
@@ -101,7 +171,7 @@ describe("새 2D 프로젝트 모델", () => {
   it("사용한 코어만 cableRunId 연결로 만들고 미사용 코어는 케이블 스냅샷에 유지한다", () => {
     const fixture = twoConnectors();
     const cores = [
-      { name: "CORE 1", color: "BK", gauge: "22 AWG" },
+      { name: "CORE 1", color: "WH/RD", gauge: "22 AWG" },
       { name: "CORE 2", color: "WH", gauge: "22 AWG" },
       { name: "CORE 3", color: "RD", gauge: "22 AWG" },
       { name: "CORE 4", color: "GN", gauge: "22 AWG" },
@@ -118,7 +188,32 @@ describe("새 2D 프로젝트 모델", () => {
 
     expect(harness.cableRuns[0]).toMatchObject({ reference: "CBL-001", lengthMm: 300, cores });
     expect(harness.connections).toHaveLength(1);
-    expect(harness.connections[0]).toMatchObject({ kind: "cableCore", reference: "CBL-001:1", cableRunId: result.cableRunId, cableCoreIndex: 0 });
+    expect(harness.connections[0]).toMatchObject({ kind: "cableCore", reference: "CBL-001:1", cableRunId: result.cableRunId, cableCoreIndex: 0, color: "WH/RD" });
+  });
+
+  it("커넥터가 없는 탈피 끝단을 단선과 케이블 코어에 저장한다", () => {
+    const fixture = twoConnectors();
+    const freeEnd = { componentId: "", pinId: "", freeEnd: { position: { x: 850, y: 160 }, stripLengthMm: 9 } };
+    const wire = addWireRun(fixture.project, fixture.harnessId, {
+      part: {
+        name: "20 AWG 단선", partNumber: "WIRE-20", manufacturer: "Test", outerDiameterMm: 1.6,
+        color: "RD", gauge: "20 AWG", source: { libraryId: "L1", libraryRevision: "1", partId: "W1" },
+      },
+      from: fixture.from,
+      to: freeEnd,
+      lengthMm: 300,
+    });
+    const cable = addCableRun(wire.project, fixture.harnessId, {
+      part: {
+        name: "2C 케이블", partNumber: "CABLE-2", manufacturer: "Test", outerDiameterMm: 5,
+        cores: [{ name: "CORE 1", color: "BK", gauge: "22 AWG" }],
+        source: { libraryId: "L1", libraryRevision: "1", partId: "C1" },
+      },
+      lengthMm: 300,
+      mappings: [{ coreIndex: 0, from: fixture.from, to: freeEnd }],
+    });
+
+    expect(cable.project.harnesses[0].connections.map((connection) => connection.to.freeEnd?.stripLengthMm)).toEqual([9, 9]);
   });
 
   it("핀 연결은 세그먼트 없이 양 끝 핀만 저장한다", () => {

@@ -1,17 +1,30 @@
-import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App2D from "./App2D";
 
 function addConnector(name: string, pinCount: number) {
-  fireEvent.click(screen.getByRole("button", { name: "커넥터" }));
+  fireEvent.click(screen.getByRole("button", { name: "부품 추가" }));
   const dialog = screen.getByText("새 2D 부품 인스턴스를 만듭니다.").closest("form")!;
   fireEvent.change(within(dialog).getByLabelText("파트명"), { target: { value: name } });
   fireEvent.change(within(dialog).getByLabelText("핀 수"), { target: { value: String(pinCount) } });
   fireEvent.click(within(dialog).getByRole("button", { name: "추가" }));
 }
 
+function dragTreeItem(source: HTMLElement, target: HTMLElement, targetY: number) {
+  vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+    x: 0, y: 0, top: 0, left: 0, right: 220, bottom: 32, width: 220, height: 32, toJSON: () => ({}),
+  });
+  vi.mocked(document.elementFromPoint).mockReturnValue(target);
+  fireEvent.mouseDown(source, { button: 0, clientX: 0, clientY: 0 });
+  fireEvent.mouseMove(window, { buttons: 0, clientX: 100, clientY: targetY });
+  fireEvent.mouseUp(window, { button: 0, clientX: 100, clientY: targetY });
+}
+
 describe("새 2D 편집 화면", () => {
-  beforeEach(() => installLocalStorage());
+  beforeEach(() => {
+    installLocalStorage();
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn(() => null) });
+  });
 
   it("용지 기준 PDF와 인쇄 명령을 제공한다", () => {
     render(<App2D />);
@@ -19,6 +32,21 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByRole("button", { name: "PDF" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "인쇄" })).toBeEnabled();
     expect(screen.queryByText("새 2D 엔진")).not.toBeInTheDocument();
+  });
+
+  it("커넥터·단선·멀티코어 케이블 추가 화면을 하나의 창에서 전환한다", () => {
+    render(<App2D />);
+
+    expect(screen.getAllByRole("button", { name: "부품 추가" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "부품 추가" }));
+    expect(screen.getByRole("dialog", { name: "부품 추가" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "추가할 부품 종류" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "단선" }));
+    expect(screen.getByText("단선의 각 끝을 커넥터 핀 또는 탈피 끝단으로 지정합니다.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "멀티코어 케이블" }));
+    expect(screen.getByText("멀티코어 케이블의 각 끝을 커넥터 핀 또는 탈피 끝단으로 지정합니다.")).toBeInTheDocument();
   });
 
   it("환경설정을 저장하고 캔버스에 즉시 반영한다", () => {
@@ -103,6 +131,21 @@ describe("새 2D 편집 화면", () => {
     expect(label).toBeInTheDocument();
   });
 
+  it("현재 도면의 공통 정보를 일괄 적용하고 새 하네스가 상속한다", () => {
+    render(<App2D />);
+
+    fireEvent.change(screen.getByLabelText("리비전"), { target: { value: "B" } });
+    fireEvent.change(screen.getByLabelText("작성자"), { target: { value: "홍길동" } });
+    fireEvent.change(screen.getByLabelText("검토자"), { target: { value: "김검토" } });
+    fireEvent.click(screen.getByRole("button", { name: "현재 공통 정보를 전체 하네스에 적용" }));
+    expect(screen.getByText("1개 하네스 도면에 공통 정보를 적용했습니다.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
+    expect(screen.getByLabelText("리비전")).toHaveValue("B");
+    expect(screen.getByLabelText("작성자")).toHaveValue("홍길동");
+    expect(screen.getByLabelText("검토자")).toHaveValue("김검토");
+  });
+
   it("좌측 추가 버튼으로 새 빈 하네스 도면을 생성하고 활성화한다", () => {
     render(<App2D />);
 
@@ -111,6 +154,35 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByRole("button", { name: "HNS-002 하네스 도면" })).toHaveClass("is-selected");
     expect(screen.getByText("HNS-002 빈 하네스 도면을 생성했습니다.")).toBeInTheDocument();
     expect(screen.getByText("빈 2D 도면")).toBeInTheDocument();
+  });
+
+  it("여러 하네스 시트를 탭으로 열고 전환 및 순서 변경한다", () => {
+    render(<App2D />);
+    fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
+    fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
+
+    const tabList = screen.getByRole("tablist", { name: "열린 하네스 시트" });
+    const tabs = within(tabList).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "HNS-001 새 하네스 시트",
+      "HNS-002 새 하네스 시트",
+      "HNS-003 새 하네스 시트",
+    ]);
+    fireEvent.click(within(tabList).getByRole("tab", { name: "HNS-001 새 하네스 시트" }));
+    expect(within(tabList).getByRole("tab", { name: "HNS-001 새 하네스 시트" })).toHaveAttribute("aria-selected", "true");
+
+    vi.spyOn(tabList, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 600, bottom: 27, width: 600, height: 27, toJSON: () => ({}) });
+    tabs.forEach((tab, index) => vi.spyOn(tab, "getBoundingClientRect").mockReturnValue({ x: index * 200, y: 0, left: index * 200, top: 0, right: index * 200 + 200, bottom: 27, width: 200, height: 27, toJSON: () => ({}) }));
+    const third = within(tabList).getByRole("tab", { name: "HNS-003 새 하네스 시트" });
+    fireEvent.pointerDown(third, { button: 0, pointerId: 31, clientX: 500, clientY: 12 });
+    fireEvent.pointerMove(third, { pointerId: 31, clientX: 50, clientY: 12 });
+    fireEvent.pointerUp(third, { pointerId: 31, clientX: 50, clientY: 12 });
+
+    expect(within(tabList).getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "HNS-003 새 하네스 시트",
+      "HNS-001 새 하네스 시트",
+      "HNS-002 새 하네스 시트",
+    ]);
   });
 
   it("선택한 하네스 도면을 확인 후 삭제하고 인접 도면으로 전환한다", () => {
@@ -132,18 +204,8 @@ describe("새 2D 편집 화면", () => {
     fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
     fireEvent.click(screen.getByRole("button", { name: "새 하네스 도면 생성" }));
     const source = screen.getByRole("button", { name: "HNS-003 하네스 도면" });
-    fireEvent.dragStart(source);
     const target = screen.getByRole("button", { name: "HNS-001 하네스 도면" });
-    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 0, top: 0, left: 0, right: 220, bottom: 32, width: 220, height: 32, toJSON: () => ({}),
-    });
-
-    const dragOver = createEvent.dragOver(target);
-    Object.defineProperty(dragOver, "clientY", { value: 4 });
-    fireEvent(target, dragOver);
-    const drop = createEvent.drop(target);
-    Object.defineProperty(drop, "clientY", { value: 4 });
-    fireEvent(target, drop);
+    dragTreeItem(source, target, 4);
 
     expect(screen.getAllByRole("button", { name: /HNS-\d+ 하네스 도면/ }).map((button) => button.getAttribute("aria-label"))).toEqual([
       "HNS-003 하네스 도면",
@@ -151,6 +213,38 @@ describe("새 2D 편집 화면", () => {
       "HNS-002 하네스 도면",
     ]);
     expect(screen.getByText("HNS-003 도면을 HNS-001 앞에 이동했습니다.")).toBeInTheDocument();
+  });
+
+  it("폴더 이름을 직접 수정하고 하네스를 폴더 안으로 드래그한다", () => {
+    render(<App2D />);
+    fireEvent.click(screen.getByRole("button", { name: "새 최상위 폴더 생성" }));
+    const folder = screen.getByRole("button", { name: "새 폴더 폴더" });
+
+    fireEvent.doubleClick(folder);
+    const input = screen.getByRole("textbox", { name: "이름 수정" });
+    fireEvent.change(input, { target: { value: "제어반" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const renamedFolder = screen.getByRole("button", { name: "제어반 폴더" });
+    const harness = screen.getByRole("button", { name: "HNS-001 하네스 도면" });
+    dragTreeItem(harness, renamedFolder, 16);
+
+    expect(within(renamedFolder.parentElement!).getByRole("button", { name: "HNS-001 하네스 도면" })).toBeInTheDocument();
+  });
+
+  it("우클릭으로 하위 폴더를 만들고 폴더 삭제 시 내부 하네스를 보존한다", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App2D />);
+    fireEvent.click(screen.getByRole("button", { name: "새 최상위 폴더 생성" }));
+    const folder = screen.getByRole("button", { name: "새 폴더 폴더" });
+    fireEvent.contextMenu(folder, { clientX: 30, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "하위 폴더 만들기" }));
+    expect(screen.getAllByRole("button", { name: "새 폴더 폴더" })).toHaveLength(2);
+
+    fireEvent.click(folder);
+    fireEvent.click(screen.getByRole("button", { name: "선택한 하네스 도면 삭제" }));
+    expect(screen.getAllByRole("button", { name: "새 폴더 폴더" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "HNS-001 하네스 도면" })).toBeInTheDocument();
   });
 
   it("이미지 파일을 도면 요소로 삽입한다", async () => {
@@ -398,6 +492,39 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByRole("button", { name: "HNS-001 하네스 도면" })).toHaveClass("is-selected");
     expect(screen.getByRole("heading", { name: "PIN MAP 1" })).toBeInTheDocument();
     expect(screen.getByTestId("connector-J1")).toHaveAttribute("transform", "translate(100 100)");
+  });
+
+  it("상단 STEP 버튼에서 메인 도면용 STEP 편집기를 연다", () => {
+    render(<App2D />);
+    fireEvent.click(screen.getByRole("button", { name: "STEP" }));
+    expect(screen.getByRole("dialog", { name: "STEP 도면 객체 편집기" })).toBeInTheDocument();
+    expect(screen.getByText("STEP 각도와 표면 색상을 정한 뒤 투영 객체를 도면에 추가합니다.")).toBeInTheDocument();
+  });
+
+  it("메인 도면의 STEP 객체를 다시 열어 수정하고 배치 크기는 유지한다", async () => {
+    render(<App2D />);
+    fireEvent.click(screen.getByRole("button", { name: "STEP" }));
+    const editor = screen.getByRole("dialog", { name: "STEP 도면 객체 편집기" });
+    const dxf = new File([`0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nOUTLINE\n10\n0\n20\n0\n11\n40\n21\n20\n0\nENDSEC\n0\nEOF`], "edit-step.dxf");
+    fireEvent.change(editor.querySelector("input[type=file]")!, { target: { files: [dxf] } });
+    await screen.findByText("edit-step.dxf · 형상 1개");
+    fireEvent.click(screen.getByRole("button", { name: "도면에 추가" }));
+
+    const annotation = await screen.findByLabelText("edit-step.dxf 주석");
+    fireEvent.pointerDown(annotation, { button: 0, pointerId: 31, clientX: 200, clientY: 150 });
+    fireEvent.pointerUp(screen.getByLabelText("하네스 2D 도면"), { pointerId: 31, clientX: 200, clientY: 150 });
+    fireEvent.change(screen.getByLabelText("너비"), { target: { value: "210" } });
+    fireEvent.change(screen.getByLabelText("높이"), { target: { value: "95" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "STEP 도면 수정" }));
+    expect(screen.getByRole("button", { name: "도면 수정 적용" })).toBeInTheDocument();
+    expect(screen.getByText("edit-step.dxf · 형상 1개")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "도면 수정 적용" }));
+
+    expect(screen.getAllByLabelText("edit-step.dxf 주석")).toHaveLength(1);
+    expect(screen.getByLabelText("너비")).toHaveValue(210);
+    expect(screen.getByLabelText("높이")).toHaveValue(95);
+    expect(screen.getByText("STEP 투영 객체를 수정했습니다.")).toBeInTheDocument();
   });
 });
 

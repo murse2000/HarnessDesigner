@@ -81,6 +81,7 @@ function rotatePoint(point: Point2D, center: Point2D, angle: number): Point2D {
 }
 
 export function endpointPosition(harness: Harness2D, endpoint: PinEndpoint2D): Point2D {
+  if (endpoint.freeEnd) return { ...endpoint.freeEnd.position };
   const connector = harness.components.find((component) => component.id === endpoint.componentId);
   const placement = harness.drawing.componentPlacements[endpoint.componentId];
   if (!connector || !placement) throw new Error("연결점 위치를 계산할 수 없습니다.");
