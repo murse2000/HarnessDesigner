@@ -21,6 +21,7 @@ describe("2D 케이블 라벨", () => {
       lengthMm: 300,
     }).project;
 
+    const onMoveSelection = vi.fn();
     const { container } = render(<Canvas2D
       harness={project.harnesses[0]}
       projectNumber="PRJ-001"
@@ -34,7 +35,7 @@ describe("2D 케이블 라벨", () => {
       onSelectComponentLabel={vi.fn()}
       onSelectAnnotation={vi.fn()}
       onSelectHeatShrink={vi.fn()}
-      onMoveSelection={vi.fn()}
+      onMoveSelection={onMoveSelection}
       onMoveConnectionRoute={vi.fn()}
       onMoveCableRunRoute={vi.fn()}
       onMoveCableRunBreakout={vi.fn()}
@@ -53,6 +54,75 @@ describe("2D 케이블 라벨", () => {
     />);
 
     expect(container.querySelector(".hd2-stripped-end path")).toHaveAttribute("d", expect.stringContaining("500 140"));
+    const canvas = screen.getByLabelText("하네스 2D 도면");
+    const wire = container.querySelector<SVGPathElement>(".hd2-wire-hit")!;
+    fireEvent.pointerDown(wire, { button: 0, pointerId: 2, clientX: 400, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 440, clientY: 130 });
+
+    expect(container.querySelector(".hd2-stripped-end path")).toHaveAttribute("d", expect.stringContaining("540 170"));
+    fireEvent.pointerUp(canvas, { pointerId: 2, clientX: 440, clientY: 130 });
+    expect(onMoveSelection).toHaveBeenCalledWith({ componentIds: [], connectionIds: [project.harnesses[0].connections[0].id], cableRunIds: [] }, { x: 40, y: 30 });
+  });
+
+  it("커넥터가 없는 멀티코어 케이블 외피를 드래그하면 케이블 전체 이동을 요청한다", () => {
+    let project = createEmptyProject();
+    const harnessId = project.harnesses[0].id;
+    const connector = addConnector(project, harnessId, { name: "A", partNumber: "A-2", manufacturer: "Test", pinCount: 2 }, { x: 100, y: 100 });
+    project = connector.project;
+    const harness = project.harnesses[0];
+    const cable = addCableRun(project, harnessId, {
+      part: {
+        name: "2C 케이블", partNumber: "MC-2C", manufacturer: "Test", outerDiameterMm: 5,
+        cores: [{ name: "CORE 1", color: "BK", gauge: "22 AWG" }, { name: "CORE 2", color: "RD", gauge: "22 AWG" }],
+        source: { libraryId: "L1", libraryRevision: "1", partId: "C1" },
+      },
+      lengthMm: 300,
+      mappings: harness.components[0].pins.map((pin, index) => ({
+        coreIndex: index,
+        from: { componentId: connector.componentId, pinId: pin.id },
+        to: { componentId: "", pinId: "", freeEnd: { position: { x: 500, y: 130 + index * 20 }, stripLengthMm: 10 } },
+      })),
+    });
+    const onMoveSelection = vi.fn();
+
+    render(<Canvas2D
+      harness={cable.project.harnesses[0]}
+      projectNumber="PRJ-001"
+      projectName="테스트 프로젝트"
+      settings={defaultSettings2D}
+      selection={{ componentIds: [], connectionIds: [], cableRunIds: [] }}
+      selectedLabel={null}
+      selectedAnnotationId={null}
+      selectedHeatShrinkId={null}
+      onSelectionChange={vi.fn()}
+      onSelectComponentLabel={vi.fn()}
+      onSelectAnnotation={vi.fn()}
+      onSelectHeatShrink={vi.fn()}
+      onMoveSelection={onMoveSelection}
+      onMoveConnectionRoute={vi.fn()}
+      onMoveCableRunRoute={vi.fn()}
+      onMoveCableRunBreakout={vi.fn()}
+      onMoveCableRunLabel={vi.fn()}
+      onMoveComponentLabel={vi.fn()}
+      onMoveComponentPinMap={vi.fn()}
+      onResizeComponent={vi.fn()}
+      onRenameConnection={vi.fn()}
+      onUpdateProjectMetadata={vi.fn()}
+      onUpdateHarnessMetadata={vi.fn()}
+      onUpdateTitleBlock={vi.fn()}
+      onUpdateAnnotation={vi.fn()}
+      onUpdateHeatShrink={vi.fn()}
+      onConnect={vi.fn()}
+      onMousePositionChange={vi.fn()}
+    />);
+
+    const canvas = screen.getByLabelText("하네스 2D 도면");
+    const jacket = screen.getByLabelText("CBL-001 외피");
+    fireEvent.pointerDown(jacket, { button: 0, pointerId: 3, clientX: 350, clientY: 120 });
+    fireEvent.pointerMove(canvas, { pointerId: 3, clientX: 390, clientY: 150 });
+    fireEvent.pointerUp(canvas, { pointerId: 3, clientX: 390, clientY: 150 });
+
+    expect(onMoveSelection).toHaveBeenCalledWith({ componentIds: [], connectionIds: [], cableRunIds: [cable.cableRunId] }, { x: 40, y: 30 });
   });
   it("등록된 부품 심벌의 윤곽을 진한 색상과 저장된 강도로 표시한다", () => {
     let project = createEmptyProject();

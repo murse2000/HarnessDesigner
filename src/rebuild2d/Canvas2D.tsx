@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
 import { cableRunGeometry, connectorBounds, connectorHeight, connectorSize, CONNECTOR_HEADER_HEIGHT, CONNECTOR_INFO_HEIGHT, CONNECTOR_WIDTH, defaultRoutePoint, endpointPosition, orthogonalPath, pinPosition, PIN_ROW_HEIGHT, routedPath, routedPointAtRatio, routedRatioAtPoint, routedSlicePath, sampleRoutedPath } from "./geometry";
 import { drawingPathData, partDrawingStrokeWidth } from "./dxfSymbol";
-import type { CableHeatShrink2D, CableRunBreakout2D, ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D } from "./model";
+import type { CableHeatShrink2D, CableRunBreakout2D, ComponentPlacement2D, Connector2D, DrawingAnnotation2D, DrawingTitleBlock2D, Harness2D, PinEndpoint2D, Point2D, Project2D, ProjectDocumentIndexEntry2D } from "./model";
 import type { Settings2D } from "./settings";
 import { splitWireColor, wireColorValue } from "./wireColor";
 
@@ -15,6 +15,7 @@ type Props = {
   harness: Harness2D;
   projectNumber: string;
   projectName: string;
+  documentIndex?: ProjectDocumentIndexEntry2D[];
   settings: Settings2D;
   selection: CanvasSelection;
   selectedLabel: SelectedConnectorLabel | null;
@@ -35,6 +36,7 @@ type Props = {
   onRenameConnection: (connectionId: string, reference: string) => void;
   onUpdateProjectMetadata: (changes: Partial<Pick<Project2D, "projectNumber" | "name">>) => void;
   onUpdateHarnessMetadata: (changes: Partial<Pick<Harness2D, "partNumber" | "name" | "revision">>) => void;
+  onUpdateIndexedSheet?: (sheetId: string, changes: Partial<Pick<Harness2D, "partNumber" | "name" | "revision">>) => void;
   onUpdateTitleBlock: (changes: Partial<DrawingTitleBlock2D>) => void;
   onUpdateAnnotation: (annotationId: string, changes: Partial<Omit<DrawingAnnotation2D, "id" | "kind">>) => void;
   onUpdateHeatShrink: (heatShrinkId: string, changes: Partial<Pick<CableHeatShrink2D, "text" | "startRatio" | "endRatio">>) => void;
@@ -138,7 +140,18 @@ type HeatShrinkDrag = {
 };
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
-export function Canvas2D({ harness, projectNumber, projectName, settings, selection, selectedLabel, selectedAnnotationId, selectedHeatShrinkId, onSelectionChange, onSelectComponentLabel, onSelectAnnotation, onSelectHeatShrink, onMoveSelection, onMoveConnectionRoute, onMoveCableRunRoute, onMoveCableRunBreakout, onMoveCableRunLabel, onMoveComponentLabel, onMoveComponentPinMap, onResizeComponent, onRenameConnection, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock, onUpdateAnnotation, onUpdateHeatShrink, onConnect, onMousePositionChange }: Props) {
+const moveFreeEndpointPreview = (endpoint: PinEndpoint2D, delta: Point2D): PinEndpoint2D => endpoint.freeEnd ? {
+  ...endpoint,
+  freeEnd: {
+    ...endpoint.freeEnd,
+    position: {
+      x: endpoint.freeEnd.position.x + delta.x,
+      y: endpoint.freeEnd.position.y + delta.y,
+    },
+  },
+} : endpoint;
+
+export function Canvas2D({ harness, projectNumber, projectName, documentIndex = [], settings, selection, selectedLabel, selectedAnnotationId, selectedHeatShrinkId, onSelectionChange, onSelectComponentLabel, onSelectAnnotation, onSelectHeatShrink, onMoveSelection, onMoveConnectionRoute, onMoveCableRunRoute, onMoveCableRunBreakout, onMoveCableRunLabel, onMoveComponentLabel, onMoveComponentPinMap, onResizeComponent, onRenameConnection, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateIndexedSheet = () => undefined, onUpdateTitleBlock, onUpdateAnnotation, onUpdateHeatShrink, onConnect, onMousePositionChange }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, pan: { x: 40, y: 40 } });
   const [componentDrag, setComponentDrag] = useState<ComponentDrag | null>(null);
@@ -205,7 +218,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
   }, []);
 
   const visibleHarness = useMemo<Harness2D>(() => {
-    if (Object.keys(previewPositions).length === 0 && Object.keys(previewConnectionRoutes).length === 0 && Object.keys(previewCableRunRoutes).length === 0 && !previewCableRunBreakoutPoint && Object.keys(previewLabelOffsets).length === 0 && Object.keys(previewPinMapOffsets).length === 0 && Object.keys(previewCableLabelOffsets).length === 0 && Object.keys(previewComponentScales).length === 0 && !previewHeatShrink) return harness;
+    if (!componentDrag && Object.keys(previewPositions).length === 0 && Object.keys(previewConnectionRoutes).length === 0 && Object.keys(previewCableRunRoutes).length === 0 && !previewCableRunBreakoutPoint && Object.keys(previewLabelOffsets).length === 0 && Object.keys(previewPinMapOffsets).length === 0 && Object.keys(previewCableLabelOffsets).length === 0 && Object.keys(previewComponentScales).length === 0 && !previewHeatShrink) return harness;
     const placements = { ...harness.drawing.componentPlacements };
     Object.entries(previewPositions).forEach(([componentId, position]) => {
       const current = placements[componentId];
@@ -237,6 +250,13 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       cableRunRoutes[cableRunId] = { point };
     });
     const cableRunBreakouts = { ...harness.drawing.cableRunBreakouts };
+    componentDrag?.selection.cableRunIds.forEach((cableRunId) => {
+      const breakout = cableRunBreakouts[cableRunId];
+      if (breakout) cableRunBreakouts[cableRunId] = {
+        from: breakout.from ? { x: breakout.from.x + componentDrag.delta.x, y: breakout.from.y + componentDrag.delta.y } : undefined,
+        to: breakout.to ? { x: breakout.to.x + componentDrag.delta.x, y: breakout.to.y + componentDrag.delta.y } : undefined,
+      };
+    });
     if (cableRunBreakoutDrag && previewCableRunBreakoutPoint) {
       cableRunBreakouts[cableRunBreakoutDrag.cableRunId] = {
         ...cableRunBreakouts[cableRunBreakoutDrag.cableRunId],
@@ -245,8 +265,20 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     }
     const cableRunLabelOffsets = { ...harness.drawing.cableRunLabelOffsets, ...previewCableLabelOffsets };
     const cableHeatShrinks = (harness.drawing.cableHeatShrinks ?? []).map((heatShrink) => previewHeatShrink?.id === heatShrink.id ? previewHeatShrink : heatShrink);
-    return { ...harness, drawing: { ...harness.drawing, componentPlacements: placements, connectionRoutes, cableRunRoutes, cableRunBreakouts, cableRunLabelOffsets, cableHeatShrinks } };
-  }, [cableRunBreakoutDrag, harness, previewCableLabelOffsets, previewCableRunBreakoutPoint, previewCableRunRoutes, previewComponentScales, previewConnectionRoutes, previewHeatShrink, previewLabelOffsets, previewPinMapOffsets, previewPositions]);
+    const movingConnections = componentDrag ? new Set([
+      ...componentDrag.selection.connectionIds,
+      ...harness.connections.filter((connection) => componentDrag.selection.cableRunIds.includes(connection.cableRunId ?? "")).map((connection) => connection.id),
+    ]) : null;
+    const connections = movingConnections ? harness.connections.map((connection) => {
+      if (!movingConnections.has(connection.id)) return connection;
+      return {
+        ...connection,
+        from: moveFreeEndpointPreview(connection.from, componentDrag!.delta),
+        to: moveFreeEndpointPreview(connection.to, componentDrag!.delta),
+      };
+    }) : harness.connections;
+    return { ...harness, connections, drawing: { ...harness.drawing, componentPlacements: placements, connectionRoutes, cableRunRoutes, cableRunBreakouts, cableRunLabelOffsets, cableHeatShrinks } };
+  }, [cableRunBreakoutDrag, componentDrag, harness, previewCableLabelOffsets, previewCableRunBreakoutPoint, previewCableRunRoutes, previewComponentScales, previewConnectionRoutes, previewHeatShrink, previewLabelOffsets, previewPinMapOffsets, previewPositions]);
 
   const toWorld = (clientX: number, clientY: number): Point2D => {
     const bounds = svgRef.current?.getBoundingClientRect();
@@ -505,26 +537,29 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
     });
   };
 
-  const beginComponentDrag = (event: ReactPointerEvent<SVGGElement>, componentId: string) => {
+  const beginSelectionDrag = (event: ReactPointerEvent<SVGElement>, key: keyof CanvasSelection, id: string) => {
     if (event.button !== 0 || spacePressed) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedPinMapComponentId(null);
-    const placement = visibleHarness.drawing.componentPlacements[componentId];
-    if (!placement) return;
-    const selected = selection.componentIds.includes(componentId);
+    const selected = selection[key].includes(id);
     if (event.shiftKey && selected) {
-      onSelectionChange({ ...selection, componentIds: selection.componentIds.filter((id) => id !== componentId) });
+      onSelectionChange({ ...selection, [key]: selection[key].filter((selectedId) => selectedId !== id) });
       return;
     }
     const dragSelection = selected
       ? selection
       : event.shiftKey
-        ? { ...selection, componentIds: [...selection.componentIds, componentId] }
-        : { componentIds: [componentId], connectionIds: [], cableRunIds: [] };
+        ? { ...selection, [key]: [...selection[key], id] }
+        : { componentIds: [], connectionIds: [], cableRunIds: [], [key]: [id] };
     onSelectionChange(dragSelection);
     svgRef.current?.setPointerCapture?.(event.pointerId);
     setComponentDrag({ selection: dragSelection, pointerStart: toWorld(event.clientX, event.clientY), delta: { x: 0, y: 0 }, pointerId: event.pointerId });
+  };
+
+  const beginComponentDrag = (event: ReactPointerEvent<SVGGElement>, componentId: string) => {
+    if (!visibleHarness.drawing.componentPlacements[componentId]) return;
+    beginSelectionDrag(event, "componentIds", componentId);
   };
 
   const beginComponentScaleDrag = (
@@ -755,7 +790,27 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
       </defs>
       <g transform={`translate(${viewport.pan.x} ${viewport.pan.y}) scale(${viewport.zoom})`}>
         {settings.gridVisible && <rect className="hd2-grid" x={-5000} y={-5000} width={10000} height={10000} fill="url(#hd2-grid)" />}
-        {settings.drawingTemplateVisible && <DrawingTemplate
+        {harness.sheetType === "cover" && <CoverSheet
+          sheet={settings.drawingSheet}
+          projectNumber={projectNumber}
+          projectName={projectName}
+          harness={visibleHarness}
+          onUpdateProjectMetadata={onUpdateProjectMetadata}
+          onUpdateHarnessMetadata={onUpdateHarnessMetadata}
+          onUpdateTitleBlock={onUpdateTitleBlock}
+        />}
+        {harness.sheetType === "toc" && <TableOfContentsSheet
+          sheet={settings.drawingSheet}
+          projectNumber={projectNumber}
+          projectName={projectName}
+          harness={visibleHarness}
+          entries={documentIndex}
+          onUpdateProjectMetadata={onUpdateProjectMetadata}
+          onUpdateHarnessMetadata={onUpdateHarnessMetadata}
+          onUpdateIndexedSheet={onUpdateIndexedSheet}
+          onUpdateTitleBlock={onUpdateTitleBlock}
+        />}
+        {(harness.sheetType ?? "harness") === "harness" && settings.drawingTemplateVisible && <DrawingTemplate
           sheet={settings.drawingSheet}
           projectNumber={projectNumber}
           projectName={projectName}
@@ -797,8 +852,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
                 </g>;
               })}
               <path className="hd2-cable-hit" d={jacketPath} aria-label={`${cableRun.reference} 외피`} onPointerDown={(event) => {
-                event.stopPropagation();
-                onSelectionChange({ componentIds: [], connectionIds: [], cableRunIds: [cableRun.id] });
+                beginSelectionDrag(event, "cableRunIds", cableRun.id);
               }} />
               <path className={`hd2-cable-jacket${selected ? " is-selected" : ""}`} d={jacketPath} style={{ strokeWidth: jacketWidth }} />
               <circle className="hd2-cable-collar" cx={geometry.fromJunction.x} cy={geometry.fromJunction.y} r={jacketWidth / 2 + 2} />
@@ -860,8 +914,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
             const color = splitWireColor(connection.color);
             return <g key={connection.id}>
               <path className="hd2-wire-hit" d={path} aria-label={`${connection.reference} 전선`} onPointerDown={(event) => {
-                event.stopPropagation();
-                onSelectionChange({ componentIds: [], connectionIds: [connection.id], cableRunIds: [] });
+                beginSelectionDrag(event, "connectionIds", connection.id);
               }} />
               <path className={`hd2-wire${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColorValue(color.primary) }} />
               {color.secondary && <path className={`hd2-wire-stripe${selected ? " is-selected" : ""}`} d={path} style={{ stroke: wireColorValue(color.secondary) }} />}
@@ -1046,7 +1099,7 @@ export function Canvas2D({ harness, projectNumber, projectName, settings, select
         })}
       </g>
     </svg>
-    {harness.components.length === 0 && (harness.drawing.annotations?.length ?? 0) === 0 && <div className="hd2-empty-canvas">
+    {(harness.sheetType ?? "harness") === "harness" && harness.components.length === 0 && (harness.drawing.annotations?.length ?? 0) === 0 && <div className="hd2-empty-canvas">
       <strong>빈 2D 도면</strong>
       <span>상단의 부품 추가 버튼으로 시작하세요.</span>
     </div>}
@@ -1119,6 +1172,16 @@ function DrawingAnnotation({ annotation, selected, onMove, onResize, onRotate }:
   const center = { x: annotation.width / 2, y: annotation.height / 2 };
   const rotationRadius = Math.hypot(annotation.width, annotation.height) / 2 + 14;
   const maskId = `hd2-step-mask-${annotation.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const textAlign = annotation.textAlign ?? (annotation.kind === "label" ? "center" : "left");
+  const textAnchor = textAlign === "center" ? "middle" : textAlign === "right" ? "end" : "start";
+  const textX = textAlign === "center" ? annotation.width / 2 : textAlign === "right" ? annotation.width - 6 : 6;
+  const textStyle = {
+    fill: annotation.textColor,
+    fontSize: annotation.fontSize,
+    fontFamily: annotation.fontFamily ?? "Arial, sans-serif",
+    fontStyle: annotation.italic ? "italic" : "normal",
+    textDecoration: annotation.underline ? "underline" : "none",
+  };
   return <g
     className={`hd2-annotation hd2-annotation--${annotation.kind}${selected ? " is-selected" : ""}`}
     transform={rotation === 0 ? `translate(${x} ${y})` : `translate(${x} ${y}) rotate(${rotation} ${center.x} ${center.y})`}
@@ -1128,9 +1191,12 @@ function DrawingAnnotation({ annotation, selected, onMove, onResize, onRotate }:
     <rect className="hd2-annotation-hit" width={annotation.width} height={annotation.height} />
     {annotation.kind === "label" && <>
       <rect width={annotation.width} height={annotation.height} rx={Math.min(8, annotation.height / 2)} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />
-      <text x={annotation.width / 2} y={annotation.height / 2} dominantBaseline="middle" textAnchor="middle" style={{ fill: annotation.textColor, fontSize: annotation.fontSize }}>{annotation.text}</text>
+      <text x={textX} y={annotation.height / 2} dominantBaseline="middle" textAnchor={textAnchor} style={textStyle}>{annotation.text}</text>
     </>}
-    {annotation.kind === "text" && <text x="0" y={annotation.fontSize} style={{ fill: annotation.textColor, fontSize: annotation.fontSize }}>{annotation.text}</text>}
+    {annotation.kind === "text" && <>
+      {annotation.textBackgroundColor && <rect width={annotation.width} height={annotation.height} style={{ fill: annotation.textBackgroundColor, stroke: "none" }} />}
+      <text x={textX} y={annotation.fontSize} textAnchor={textAnchor} style={textStyle}>{annotation.text}</text>
+    </>}
     {annotation.kind === "rectangle" && <rect width={annotation.width} height={annotation.height} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
     {annotation.kind === "ellipse" && <ellipse cx={annotation.width / 2} cy={annotation.height / 2} rx={annotation.width / 2} ry={annotation.height / 2} style={{ fill: annotation.fillColor, stroke: annotation.strokeColor }} />}
     {annotation.kind === "image" && annotation.imageDataUrl && <image href={annotation.imageDataUrl} width={annotation.width} height={annotation.height} preserveAspectRatio="xMidYMid meet" />}
@@ -1251,6 +1317,121 @@ function PinMapWireName({ value, ariaLabel, onCommit }: { value: string; ariaLab
   />;
 }
 
+function drawingSheetDimensions(sheet: Settings2D["drawingSheet"]) {
+  return sheet === "A3" ? { width: 420, height: 297 } : sheet === "A2" ? { width: 594, height: 420 } : { width: 841, height: 594 };
+}
+
+function CoverSheet({ sheet, projectNumber, projectName, harness, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock }: {
+  sheet: Settings2D["drawingSheet"];
+  projectNumber: string;
+  projectName: string;
+  harness: Harness2D;
+  onUpdateProjectMetadata: Props["onUpdateProjectMetadata"];
+  onUpdateHarnessMetadata: Props["onUpdateHarnessMetadata"];
+  onUpdateTitleBlock: Props["onUpdateTitleBlock"];
+}) {
+  const dimensions = drawingSheetDimensions(sheet);
+  const centerX = dimensions.width / 2;
+  const blockWidth = dimensions.width * 0.66;
+  const blockX = (dimensions.width - blockWidth) / 2;
+  const blockY = dimensions.height * 0.7;
+  const titleBlock = harness.drawing.titleBlock;
+  return <g className="hd2-front-sheet hd2-cover-sheet" aria-label="프로젝트 표지">
+    <rect className="hd2-front-sheet-page" width={dimensions.width} height={dimensions.height} />
+    <rect className="hd2-front-sheet-frame" x="10" y="10" width={dimensions.width - 20} height={dimensions.height - 20} />
+    <text className="hd2-cover-kicker" x={centerX} y={dimensions.height * 0.25} textAnchor="middle">HARNESS DESIGN DOCUMENT</text>
+    <DirectEditText className="hd2-cover-title" x={centerX} y={dimensions.height * 0.37} width={blockWidth} fontSize={Math.max(20, dimensions.width * 0.045)} value={titleBlock?.drawingTitle ?? "HARNESS DOCUMENT PACKAGE"} ariaLabel="표지 문서 제목" onCommit={(drawingTitle) => onUpdateTitleBlock({ drawingTitle })} centered />
+    <DirectEditText className="hd2-cover-project-name" x={centerX} y={dimensions.height * 0.48} width={blockWidth} fontSize={Math.max(15, dimensions.width * 0.032)} value={projectName} ariaLabel="표지 프로젝트 이름" onCommit={(name) => onUpdateProjectMetadata({ name })} centered />
+    <DirectEditText className="hd2-cover-project-number" x={centerX} y={dimensions.height * 0.56} width={blockWidth} fontSize={Math.max(10, dimensions.width * 0.02)} value={projectNumber} ariaLabel="표지 프로젝트 번호" onCommit={(value) => onUpdateProjectMetadata({ projectNumber: value })} centered />
+    <g className="hd2-cover-meta" transform={`translate(${blockX} ${blockY})`}>
+      <rect width={blockWidth} height="72" />
+      <line x1="0" y1="24" x2={blockWidth} y2="24" /><line x1="0" y1="48" x2={blockWidth} y2="48" />
+      <line x1={blockWidth / 2} y1="0" x2={blockWidth / 2} y2="72" />
+      <CoverField label="DOCUMENT NO." x={0} y={0} width={blockWidth / 2} value={harness.partNumber} ariaLabel="표지 문서 번호" onCommit={(partNumber) => onUpdateHarnessMetadata({ partNumber })} />
+      <CoverField label="REVISION" x={blockWidth / 2} y={0} width={blockWidth / 2} value={harness.revision} ariaLabel="표지 리비전" onCommit={(revision) => onUpdateHarnessMetadata({ revision })} />
+      <CoverField label="DATE" x={0} y={24} width={blockWidth / 2} value={titleBlock?.createdDate ?? ""} ariaLabel="표지 생성일" onCommit={(createdDate) => onUpdateTitleBlock({ createdDate })} />
+      <CoverField label="DRAWN" x={blockWidth / 2} y={24} width={blockWidth / 2} value={titleBlock?.createdBy ?? ""} ariaLabel="표지 작성자" onCommit={(createdBy) => onUpdateTitleBlock({ createdBy })} />
+      <CoverField label="CHECKED" x={0} y={48} width={blockWidth / 2} value={titleBlock?.reviewedBy ?? ""} ariaLabel="표지 검토자" onCommit={(reviewedBy) => onUpdateTitleBlock({ reviewedBy })} />
+      <CoverField label="APPROVED" x={blockWidth / 2} y={48} width={blockWidth / 2} value={titleBlock?.approvedBy ?? ""} ariaLabel="표지 승인자" onCommit={(approvedBy) => onUpdateTitleBlock({ approvedBy })} />
+    </g>
+    <text className="hd2-front-sheet-hint" x={centerX} y={dimensions.height - 18} textAnchor="middle">수정할 항목을 더블클릭하세요</text>
+  </g>;
+}
+
+function CoverField({ label, x, y, width, value, ariaLabel, onCommit }: { label: string; x: number; y: number; width: number; value: string; ariaLabel: string; onCommit: (value: string) => void }) {
+  return <g transform={`translate(${x} ${y})`}>
+    <text className="hd2-cover-field-label" x="5" y="9">{label}</text>
+    <DirectEditText x={width * 0.34} y={17} width={width * 0.62} fontSize={9} value={value} ariaLabel={ariaLabel} onCommit={onCommit} />
+  </g>;
+}
+
+function TableOfContentsSheet({ sheet, projectNumber, projectName, harness, entries, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateIndexedSheet, onUpdateTitleBlock }: {
+  sheet: Settings2D["drawingSheet"];
+  projectNumber: string;
+  projectName: string;
+  harness: Harness2D;
+  entries: ProjectDocumentIndexEntry2D[];
+  onUpdateProjectMetadata: Props["onUpdateProjectMetadata"];
+  onUpdateHarnessMetadata: Props["onUpdateHarnessMetadata"];
+  onUpdateIndexedSheet: NonNullable<Props["onUpdateIndexedSheet"]>;
+  onUpdateTitleBlock: Props["onUpdateTitleBlock"];
+}) {
+  const dimensions = drawingSheetDimensions(sheet);
+  const left = 20;
+  const width = dimensions.width - 40;
+  const headerY = 70;
+  const rowHeight = Math.max(10, Math.min(16, (dimensions.height - headerY - 35) / Math.max(entries.length, 1)));
+  const columns = [0, 0.09, 0.31, 0.51, 0.9, 1].map((ratio) => left + width * ratio);
+  return <g className="hd2-front-sheet hd2-toc-sheet" aria-label="프로젝트 목차">
+    <rect className="hd2-front-sheet-page" width={dimensions.width} height={dimensions.height} />
+    <rect className="hd2-front-sheet-frame" x="10" y="10" width={dimensions.width - 20} height={dimensions.height - 20} />
+    <DirectEditText className="hd2-toc-title" x={left} y={35} width={width * 0.55} fontSize={22} value={harness.drawing.titleBlock?.drawingTitle ?? "DRAWING INDEX"} ariaLabel="목차 제목" onCommit={(drawingTitle) => onUpdateTitleBlock({ drawingTitle })} />
+    <DirectEditText className="hd2-toc-project" x={left} y={53} width={width * 0.55} fontSize={11} value={projectName} ariaLabel="목차 프로젝트 이름" onCommit={(name) => onUpdateProjectMetadata({ name })} />
+    <DirectEditText className="hd2-toc-project-number" x={left + width * 0.62} y={35} width={width * 0.38} fontSize={11} value={projectNumber} ariaLabel="목차 프로젝트 번호" onCommit={(value) => onUpdateProjectMetadata({ projectNumber: value })} />
+    <DirectEditText className="hd2-toc-revision" x={left + width * 0.62} y={53} width={width * 0.38} fontSize={9} value={harness.revision} ariaLabel="목차 리비전" onCommit={(revision) => onUpdateHarnessMetadata({ revision })} />
+    <g className="hd2-toc-table">
+      <rect x={left} y={headerY} width={width} height={rowHeight * (entries.length + 1)} />
+      {columns.slice(1, -1).map((x) => <line key={x} x1={x} y1={headerY} x2={x} y2={headerY + rowHeight * (entries.length + 1)} />)}
+      {Array.from({ length: entries.length }, (_, index) => <line key={index} x1={left} y1={headerY + rowHeight * (index + 1)} x2={left + width} y2={headerY + rowHeight * (index + 1)} />)}
+      <text x={(columns[0] + columns[1]) / 2} y={headerY + rowHeight * 0.68} textAnchor="middle">PAGE</text>
+      <text x={columns[1] + 5} y={headerY + rowHeight * 0.68}>GROUP</text>
+      <text x={columns[2] + 5} y={headerY + rowHeight * 0.68}>DOCUMENT NO.</text>
+      <text x={columns[3] + 5} y={headerY + rowHeight * 0.68}>TITLE</text>
+      <text x={(columns[4] + columns[5]) / 2} y={headerY + rowHeight * 0.68} textAnchor="middle">REV.</text>
+      {entries.map((entry, index) => {
+        const y = headerY + rowHeight * (index + 1);
+        return <g key={entry.sheetId}>
+          <text x={(columns[0] + columns[1]) / 2} y={y + rowHeight * 0.68} textAnchor="middle">{entry.pageNumber}</text>
+          <text x={columns[1] + 5} y={y + rowHeight * 0.68}>{entry.folderPath || "—"}</text>
+          <DirectEditText x={columns[2] + 3} y={y + rowHeight * 0.68} width={columns[3] - columns[2] - 6} fontSize={Math.min(9, rowHeight * 0.65)} value={entry.partNumber} ariaLabel={`${entry.pageNumber}페이지 문서 번호`} onCommit={(partNumber) => onUpdateIndexedSheet(entry.sheetId, { partNumber })} />
+          <DirectEditText x={columns[3] + 3} y={y + rowHeight * 0.68} width={columns[4] - columns[3] - 6} fontSize={Math.min(9, rowHeight * 0.65)} value={entry.name} ariaLabel={`${entry.pageNumber}페이지 제목`} onCommit={(name) => onUpdateIndexedSheet(entry.sheetId, { name })} />
+          <DirectEditText x={columns[4]} y={y + rowHeight * 0.68} width={columns[5] - columns[4]} fontSize={Math.min(9, rowHeight * 0.65)} value={entry.revision} ariaLabel={`${entry.pageNumber}페이지 리비전`} onCommit={(revision) => onUpdateIndexedSheet(entry.sheetId, { revision })} centered />
+        </g>;
+      })}
+    </g>
+    <text className="hd2-front-sheet-hint" x={dimensions.width / 2} y={dimensions.height - 18} textAnchor="middle">목차는 현재 계층 순서에서 자동 생성됩니다 · 수정할 셀을 더블클릭하세요</text>
+  </g>;
+}
+
+function DirectEditText({ x, y, width, fontSize, value, ariaLabel, onCommit, centered = false, className = "" }: { x: number; y: number; width: number; fontSize: number; value: string; ariaLabel: string; onCommit: (value: string) => void; centered?: boolean; className?: string }) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  const cancelCommitRef = useRef(false);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (!cancelCommitRef.current && draft.trim() && draft.trim() !== value) onCommit(draft.trim());
+    cancelCommitRef.current = false;
+    setEditing(false);
+  };
+  if (!editing) return <text className={`hd2-direct-edit ${className}`} x={centered ? x : x + 2} y={y} fontSize={fontSize} textAnchor={centered ? "middle" : "start"} aria-label={ariaLabel} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); setEditing(true); }}>{draft || "—"}</text>;
+  return <foreignObject x={centered ? x - width / 2 : x} y={y - fontSize} width={width} height={fontSize + 6} className="hd2-direct-input-wrap">
+    <input aria-label={ariaLabel} value={draft} autoFocus style={{ fontSize }} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => {
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") { cancelCommitRef.current = true; setDraft(value); event.currentTarget.blur(); }
+    }} />
+  </foreignObject>;
+}
+
 function DrawingTemplate({ sheet, projectNumber, projectName, harness, onUpdateProjectMetadata, onUpdateHarnessMetadata, onUpdateTitleBlock }: {
   sheet: Settings2D["drawingSheet"];
   projectNumber: string;
@@ -1260,7 +1441,7 @@ function DrawingTemplate({ sheet, projectNumber, projectName, harness, onUpdateP
   onUpdateHarnessMetadata: Props["onUpdateHarnessMetadata"];
   onUpdateTitleBlock: Props["onUpdateTitleBlock"];
 }) {
-  const dimensions = sheet === "A3" ? { width: 420, height: 297 } : sheet === "A2" ? { width: 594, height: 420 } : { width: 841, height: 594 };
+  const dimensions = drawingSheetDimensions(sheet);
   const inset = 10;
   const titleWidth = Math.min(340, dimensions.width * 0.58);
   const titleHeight = 78;

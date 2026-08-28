@@ -176,6 +176,11 @@ export type DrawingAnnotation2D = {
   height: number;
   text: string;
   fontSize: number;
+  fontFamily?: string;
+  italic?: boolean;
+  underline?: boolean;
+  textAlign?: "left" | "center" | "right";
+  textBackgroundColor?: string;
   textColor: string;
   fillColor: string;
   strokeColor: string;
@@ -207,6 +212,7 @@ export type CableRunBreakout2D = {
 
 export type Harness2D = {
   id: string;
+  sheetType?: "harness" | "cover" | "toc";
   partNumber: string;
   name: string;
   revision: string;
@@ -217,8 +223,18 @@ export type Harness2D = {
 };
 
 export type ProjectTreeNode2D =
-  | { id: string; kind: "folder"; name: string; parentId: string | null }
+  | { id: string; kind: "folder"; name: string; parentId: string | null; role?: "frontMatter" | "drawings" }
   | { id: string; kind: "harness"; harnessId: string; parentId: string | null };
+
+export type ProjectDocumentIndexEntry2D = {
+  sheetId: string;
+  pageNumber: number;
+  folderPath: string;
+  partNumber: string;
+  name: string;
+  revision: string;
+  sheetType: NonNullable<Harness2D["sheetType"]>;
+};
 
 export type Project2D = {
   documentType: typeof PROJECT_DOCUMENT_TYPE;
@@ -275,6 +291,20 @@ const now = () => new Date().toISOString();
 export function createEmptyProject(): Project2D {
   const timestamp = now();
   const harnessId = createId("harness");
+  const coverId = createId("sheet");
+  const tocId = createId("sheet");
+  const frontMatterFolderId = createId("folder");
+  const drawingsFolderId = createId("folder");
+  const drawing = (drawingTitle: string): DrawingLayout2D => ({
+    componentPlacements: {},
+    connectionRoutes: {},
+    cableRunRoutes: {},
+    cableRunBreakouts: {},
+    cableRunLabelOffsets: {},
+    cableHeatShrinks: [],
+    titleBlock: { drawingTitle, createdDate: timestamp.slice(0, 10), createdBy: "", reviewedBy: "", approvedBy: "" },
+    annotations: [],
+  });
   return {
     documentType: PROJECT_DOCUMENT_TYPE,
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -285,24 +315,42 @@ export function createEmptyProject(): Project2D {
     updatedAt: timestamp,
     harnesses: [{
       id: harnessId,
+      sheetType: "harness",
       partNumber: "HNS-001",
       name: "새 하네스",
       revision: "A",
       components: [],
       connections: [],
       cableRuns: [],
-      drawing: {
-        componentPlacements: {},
-        connectionRoutes: {},
-        cableRunRoutes: {},
-        cableRunBreakouts: {},
-        cableRunLabelOffsets: {},
-        cableHeatShrinks: [],
-        titleBlock: { drawingTitle: "HARNESS ASSEMBLY DRAWING", createdDate: timestamp.slice(0, 10), createdBy: "", reviewedBy: "", approvedBy: "" },
-        annotations: [],
-      },
+      drawing: drawing("HARNESS ASSEMBLY DRAWING"),
+    }, {
+      id: coverId,
+      sheetType: "cover",
+      partNumber: "COVER",
+      name: "표지",
+      revision: "A",
+      components: [],
+      connections: [],
+      cableRuns: [],
+      drawing: drawing("HARNESS DOCUMENT PACKAGE"),
+    }, {
+      id: tocId,
+      sheetType: "toc",
+      partNumber: "TOC",
+      name: "목차",
+      revision: "A",
+      components: [],
+      connections: [],
+      cableRuns: [],
+      drawing: drawing("DRAWING INDEX"),
     }],
-    tree: [{ id: harnessId, kind: "harness", harnessId, parentId: null }],
+    tree: [
+      { id: frontMatterFolderId, kind: "folder", name: "표지", parentId: null, role: "frontMatter" },
+      { id: coverId, kind: "harness", harnessId: coverId, parentId: frontMatterFolderId },
+      { id: tocId, kind: "harness", harnessId: tocId, parentId: frontMatterFolderId },
+      { id: drawingsFolderId, kind: "folder", name: "도면", parentId: null, role: "drawings" },
+      { id: harnessId, kind: "harness", harnessId, parentId: drawingsFolderId },
+    ],
   };
 }
 
@@ -312,6 +360,7 @@ export function addHarness(project: Project2D, parentId: string | null = null, t
   const template = project.harnesses.find((item) => item.id === templateHarnessId);
   const harness: Harness2D = {
     id: harnessId,
+    sheetType: "harness",
     partNumber: nextHarnessPartNumber(project.harnesses),
     name: "새 하네스",
     revision: template?.revision ?? "A",
@@ -341,13 +390,16 @@ export function addHarness(project: Project2D, parentId: string | null = null, t
       ...project,
       updatedAt: timestamp,
       harnesses: [...project.harnesses, harness],
-      tree: [...projectTreeNodes(project), { id: harnessId, kind: "harness", harnessId, parentId: validFolderId(project, parentId) }],
+      tree: [...projectTreeNodes(project), { id: harnessId, kind: "harness", harnessId, parentId: validFolderId(project, parentId ?? defaultDrawingsFolderId(project)) }],
     },
   };
 }
 
 export function deleteHarness(project: Project2D, harnessId: string): Project2D {
-  if (project.harnesses.length <= 1 || !project.harnesses.some((harness) => harness.id === harnessId)) return project;
+  const target = project.harnesses.find((harness) => harness.id === harnessId);
+  if (!target) return project;
+  const harnessSheetCount = project.harnesses.filter((harness) => !harness.sheetType || harness.sheetType === "harness").length;
+  if ((!target.sheetType || target.sheetType === "harness") && harnessSheetCount <= 1) return project;
   return touch({
     ...project,
     harnesses: project.harnesses.filter((harness) => harness.id !== harnessId),
@@ -373,6 +425,43 @@ export function projectTreeNodes(project: Project2D): ProjectTreeNode2D[] {
     if (!seenHarnesses.has(harness.id)) nodes.push({ id: harness.id, kind: "harness", harnessId: harness.id, parentId: null });
   }
   return nodes;
+}
+
+export function projectSheetsInTreeOrder(project: Project2D): Harness2D[] {
+  const sheetMap = new Map(project.harnesses.map((sheet) => [sheet.id, sheet]));
+  return depthFirstHarnessIds(projectTreeNodes(project)).flatMap((sheetId) => {
+    const sheet = sheetMap.get(sheetId);
+    return sheet ? [sheet] : [];
+  });
+}
+
+export function projectDocumentIndex(project: Project2D): ProjectDocumentIndexEntry2D[] {
+  const nodes = projectTreeNodes(project);
+  const sheetMap = new Map(project.harnesses.map((sheet) => [sheet.id, sheet]));
+  const folderMap = new Map(nodes.flatMap((node) => node.kind === "folder" ? [[node.id, node]] : []));
+  const folderPath = (parentId: string | null) => {
+    const names: string[] = [];
+    let current = parentId ? folderMap.get(parentId) : undefined;
+    while (current) {
+      names.unshift(current.name);
+      current = current.parentId ? folderMap.get(current.parentId) : undefined;
+    }
+    return names.join(" / ");
+  };
+  return nodes.flatMap((node): ProjectDocumentIndexEntry2D[] => {
+    if (node.kind !== "harness") return [];
+    const sheet = sheetMap.get(node.harnessId);
+    if (!sheet) return [];
+    return [{
+      sheetId: sheet.id,
+      pageNumber: 0,
+      folderPath: folderPath(node.parentId),
+      partNumber: sheet.partNumber,
+      name: sheet.name,
+      revision: sheet.revision,
+      sheetType: sheet.sheetType ?? "harness",
+    }];
+  }).map((entry, index) => ({ ...entry, pageNumber: index + 1 }));
 }
 
 export function addHarnessFolder(project: Project2D, parentId: string | null = null): { project: Project2D; folderId: string } {
@@ -605,6 +694,7 @@ export function pasteHarness(
   const harnessId = createId("harness");
   const harness: Harness2D = {
     id: harnessId,
+    sheetType: "harness",
     partNumber: nextHarnessPartNumber(project.harnesses),
     name: copied.name,
     revision: copied.revision,
@@ -625,7 +715,7 @@ export function pasteHarness(
   const appended = touch({
     ...project,
     harnesses: [...project.harnesses, harness],
-    tree: [...projectTreeNodes(project), { id: harnessId, kind: "harness", harnessId, parentId: null }],
+    tree: [...projectTreeNodes(project), { id: harnessId, kind: "harness", harnessId, parentId: defaultDrawingsFolderId(project) }],
   });
   return {
     harnessId,
@@ -1358,6 +1448,52 @@ export function updateConnection(
   }));
 }
 
+export function updateConnectionStripLength(
+  project: Project2D,
+  harnessId: string,
+  connectionId: string,
+  side: "from" | "to",
+  stripLengthMm: number,
+) {
+  if (!Number.isFinite(stripLengthMm) || stripLengthMm < 0) throw new Error("탈피 길이는 0 이상이어야 합니다.");
+  return updateHarness(project, harnessId, (harness) => ({
+    ...harness,
+    connections: harness.connections.map((connection) => {
+      if (connection.id !== connectionId || !connection[side].freeEnd) return connection;
+      return {
+        ...connection,
+        [side]: {
+          ...connection[side],
+          freeEnd: { ...connection[side].freeEnd, stripLengthMm },
+        },
+      };
+    }),
+  }));
+}
+
+export function updateCableRunStripLength(
+  project: Project2D,
+  harnessId: string,
+  cableRunId: string,
+  side: "from" | "to",
+  stripLengthMm: number,
+) {
+  if (!Number.isFinite(stripLengthMm) || stripLengthMm < 0) throw new Error("탈피 길이는 0 이상이어야 합니다.");
+  return updateHarness(project, harnessId, (harness) => ({
+    ...harness,
+    connections: harness.connections.map((connection) => {
+      if (connection.cableRunId !== cableRunId || !connection[side].freeEnd) return connection;
+      return {
+        ...connection,
+        [side]: {
+          ...connection[side],
+          freeEnd: { ...connection[side].freeEnd, stripLengthMm },
+        },
+      };
+    }),
+  }));
+}
+
 export function updateCableRun(
   project: Project2D,
   harnessId: string,
@@ -1484,7 +1620,7 @@ export function applyDrawingMetadataToAllHarnesses(project: Project2D, sourceHar
   const sourceTitleBlock = source.drawing.titleBlock;
   return touch({
     ...project,
-    harnesses: project.harnesses.map((harness) => ({
+    harnesses: project.harnesses.map((harness) => harness.sheetType && harness.sheetType !== "harness" ? harness : ({
       ...harness,
       revision: source.revision,
       drawing: {
@@ -1557,9 +1693,9 @@ export function deleteDrawingAnnotation(project: Project2D, harnessId: string, a
 }
 
 function annotationDefaults(kind: DrawingAnnotationKind2D): Omit<DrawingAnnotation2D, "id" | "kind" | "position"> {
-  const common = { fontSize: 12, textColor: "#173f59", strokeColor: "#0e6f9f" };
-  if (kind === "label") return { ...common, width: 120, height: 30, text: "LABEL", fillColor: "#d9ebf5" };
-  if (kind === "text") return { ...common, width: 160, height: 28, text: "TEXT", fillColor: "#ffffff" };
+  const common = { fontSize: 12, fontFamily: "Arial, sans-serif", italic: false, underline: false, textColor: "#173f59", strokeColor: "#0e6f9f" };
+  if (kind === "label") return { ...common, width: 120, height: 30, text: "LABEL", textAlign: "center", fillColor: "#d9ebf5" };
+  if (kind === "text") return { ...common, width: 160, height: 28, text: "TEXT", textAlign: "left", fillColor: "#ffffff" };
   if (kind === "image") return { ...common, width: 160, height: 100, text: "", fillColor: "#ffffff" };
   if (kind === "step") return { ...common, width: 160, height: 100, text: "STEP", fillColor: "#ffffff", rotation: 0 };
   return { ...common, width: 100, height: 60, text: "", fillColor: "#ffffff" };
@@ -1604,6 +1740,10 @@ function clampRatio(value: number) {
 
 function validFolderId(project: Project2D, folderId: string | null) {
   return folderId && projectTreeNodes(project).some((node) => node.kind === "folder" && node.id === folderId) ? folderId : null;
+}
+
+function defaultDrawingsFolderId(project: Project2D) {
+  return projectTreeNodes(project).find((node) => node.kind === "folder" && node.role === "drawings")?.id ?? null;
 }
 
 function folderDescendants(tree: ProjectTreeNode2D[], folderId: string) {

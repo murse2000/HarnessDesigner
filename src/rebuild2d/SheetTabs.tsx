@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { moveSheetTab } from "./sheetWorkspace";
 
-type Sheet = { id: string; partNumber: string; name: string; revision: string };
+type Sheet = { id: string; partNumber: string; name: string; revision: string; sheetType?: "harness" | "cover" | "toc" };
 
 type SheetTabsProps = {
   sheets: Sheet[];
@@ -49,6 +49,7 @@ export function SheetTabs({ sheets, openSheetIds, activeSheetId, tabBarRef, onAc
     {openSheetIds.map((sheetId) => {
       const sheet = sheetMap.get(sheetId);
       if (!sheet) return null;
+      const sheetLabel = sheet.sheetType === "cover" ? "COVER" : sheet.sheetType === "toc" ? "TOC" : "HARNESS";
       return <div
         key={sheet.id}
         role="tab"
@@ -73,7 +74,7 @@ export function SheetTabs({ sheets, openSheetIds, activeSheetId, tabBarRef, onAc
         onPointerUp={finishDrag}
         onPointerCancel={() => { dragRef.current = null; setDraggingId(null); }}
       >
-        <span>HARNESS</span><strong>{sheet.partNumber}</strong><em>{sheet.name}</em><small>REV {sheet.revision}</small>
+        <span>{sheetLabel}</span><strong>{sheet.partNumber}</strong><em>{sheet.name}</em><small>REV {sheet.revision}</small>
         <button type="button" aria-label={`${sheet.partNumber} 시트 닫기`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClose(sheet.id); }}><X size={12} /></button>
       </div>;
     })}

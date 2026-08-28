@@ -118,6 +118,22 @@ describe("새 2D 편집 화면", () => {
     fireEvent.change(screen.getByLabelText("채우기 색상"), { target: { value: "#ffeeaa" } });
     expect(screen.getByLabelText("검사 라벨 주석")).toHaveTextContent("검사 라벨");
 
+    fireEvent.change(screen.getByLabelText("텍스트 글꼴"), { target: { value: '"Courier New", monospace' } });
+    fireEvent.change(screen.getByLabelText("텍스트 도구 글자 크기"), { target: { value: "18" } });
+    fireEvent.change(screen.getByLabelText("텍스트 도구 글자 색상"), { target: { value: "#112233" } });
+    fireEvent.change(screen.getByLabelText("글자 바탕 색상"), { target: { value: "#ddeeff" } });
+    fireEvent.click(screen.getByRole("button", { name: "기울임" }));
+    fireEvent.click(screen.getByRole("button", { name: "밑줄" }));
+    fireEvent.click(screen.getByRole("button", { name: "글자 오른쪽 정렬" }));
+    const styledLabel = screen.getByLabelText("검사 라벨 주석");
+    const styledText = styledLabel.querySelector("text")!;
+    expect(styledText).toHaveAttribute("text-anchor", "end");
+    expect(styledText.getAttribute("style")).toContain('font-family: "Courier New", monospace');
+    expect(styledText.getAttribute("style")).toContain("font-size: 18px");
+    expect(styledText.getAttribute("style")).toContain("font-style: italic");
+    expect(styledText.getAttribute("style")).toContain("text-decoration: underline");
+    expect(styledLabel.querySelector("rect:not(.hd2-annotation-hit)")?.getAttribute("style")).toContain("rgb(221, 238, 255)");
+
     fireEvent.pointerDown(screen.getByLabelText("검사 라벨 주석"), { button: 0, pointerId: 21, clientX: 160, clientY: 120 });
     fireEvent.pointerMove(canvas, { pointerId: 21, clientX: 200, clientY: 150 });
     fireEvent.pointerUp(canvas, { pointerId: 21, clientX: 200, clientY: 150 });
@@ -129,6 +145,20 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByLabelText("너비")).toHaveValue(160);
     expect(screen.getByLabelText("높이")).toHaveValue(60);
     expect(label).toBeInTheDocument();
+  });
+
+  it("텍스트 주석의 바탕색을 적용하고 다시 제거한다", () => {
+    render(<App2D />);
+
+    fireEvent.click(screen.getByRole("button", { name: "텍스트" }));
+    const annotation = screen.getByLabelText("TEXT 주석");
+    expect(annotation.querySelector("rect[style*='fill']")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("글자 바탕 색상"), { target: { value: "#fff0aa" } });
+    expect(screen.getByLabelText("TEXT 주석").querySelector("rect[style*='fill']")?.getAttribute("style")).toContain("rgb(255, 240, 170)");
+
+    fireEvent.click(screen.getByRole("button", { name: "글자 바탕 없음" }));
+    expect(screen.getByLabelText("TEXT 주석").querySelector("rect[style*='fill']")).toBeNull();
   });
 
   it("현재 도면의 공통 정보를 일괄 적용하고 새 하네스가 상속한다", () => {
@@ -144,6 +174,26 @@ describe("새 2D 편집 화면", () => {
     expect(screen.getByLabelText("리비전")).toHaveValue("B");
     expect(screen.getByLabelText("작성자")).toHaveValue("홍길동");
     expect(screen.getByLabelText("검토자")).toHaveValue("김검토");
+  });
+
+  it("기본 표지와 목차를 열고 더블클릭으로 내용을 수정한다", () => {
+    render(<App2D />);
+
+    expect(screen.getByRole("button", { name: "표지 폴더" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "도면 폴더" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "COVER 표지" }));
+    fireEvent.doubleClick(screen.getByLabelText("표지 프로젝트 이름"));
+    fireEvent.change(screen.getByRole("textbox", { name: "표지 프로젝트 이름" }), { target: { value: "제어반 하네스 프로젝트" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "표지 프로젝트 이름" }), { key: "Enter" });
+    expect(screen.getByLabelText("표지 프로젝트 이름")).toHaveTextContent("제어반 하네스 프로젝트");
+
+    fireEvent.click(screen.getByRole("button", { name: "TOC 목차" }));
+    expect(screen.getByLabelText("3페이지 문서 번호")).toHaveTextContent("HNS-001");
+    fireEvent.doubleClick(screen.getByLabelText("3페이지 제목"));
+    fireEvent.change(screen.getByRole("textbox", { name: "3페이지 제목" }), { target: { value: "전장 하네스" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "3페이지 제목" }), { key: "Enter" });
+    expect(screen.getByLabelText("3페이지 제목")).toHaveTextContent("전장 하네스");
+    expect(screen.getByRole("button", { name: "HNS-001 하네스 도면" })).toHaveTextContent("전장 하네스");
   });
 
   it("좌측 추가 버튼으로 새 빈 하네스 도면을 생성하고 활성화한다", () => {

@@ -2,7 +2,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { Canvas2D } from "./Canvas2D";
 import { preparePaperDrawing, type PaperDrawing } from "./drawingOutput";
-import type { Project2D } from "./model";
+import { projectDocumentIndex, projectSheetsInTreeOrder, type Project2D } from "./model";
 import type { Settings2D } from "./settings";
 
 const emptySelection = { componentIds: [], connectionIds: [], cableRunIds: [] };
@@ -16,12 +16,14 @@ export function prepareProjectPaperDrawings(project: Project2D, settings: Settin
   const root = createRoot(host);
 
   try {
-    return project.harnesses.map((harness) => {
+    const documentIndex = projectDocumentIndex(project);
+    return projectSheetsInTreeOrder(project).map((harness) => {
       flushSync(() => root.render(<Canvas2D
         key={harness.id}
         harness={harness}
         projectNumber={project.projectNumber}
         projectName={project.name}
+        documentIndex={documentIndex}
         settings={settings}
         selection={emptySelection}
         selectedLabel={null}
@@ -42,6 +44,7 @@ export function prepareProjectPaperDrawings(project: Project2D, settings: Settin
         onRenameConnection={noop}
         onUpdateProjectMetadata={noop}
         onUpdateHarnessMetadata={noop}
+        onUpdateIndexedSheet={noop}
         onUpdateTitleBlock={noop}
         onUpdateAnnotation={noop}
         onUpdateHeatShrink={noop}

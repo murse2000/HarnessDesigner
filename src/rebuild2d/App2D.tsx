@@ -1,7 +1,7 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Box, Boxes, Cable, ChevronDown, ChevronRight, Circle, CircleHelp, FileDown, Folder, FolderOpen, FolderPlus, ImagePlus, Pencil, Plus, Printer, Redo2, RotateCw, Save, Settings2, Square, Tag, Trash2, Type, Undo2 } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, BookOpen, Box, Boxes, Cable, ChevronDown, ChevronRight, Circle, CircleHelp, FileDown, FileText, Folder, FolderOpen, FolderPlus, ImagePlus, Italic, Pencil, Plus, Printer, Redo2, RotateCw, Save, Settings2, Square, Tag, Trash2, Type, Underline, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { backendInvoke, isTauri } from "../platform";
 import { Canvas2D, type CanvasSelection, type SelectedConnectorLabel } from "./Canvas2D";
@@ -54,6 +54,7 @@ import {
   moveProjectTreeItem,
   pasteHarness,
   pasteHarnessDrawing,
+  projectDocumentIndex,
   projectTreeNodes,
   renameHarnessFolder,
   setCableRunBreakout,
@@ -67,7 +68,9 @@ import {
   setConnectionRoute,
   updateComponent,
   updateConnection,
+  updateConnectionStripLength,
   updateCableRun,
+  updateCableRunStripLength,
   updateCableHeatShrink,
   updateDrawingAnnotation,
   updateDrawingTitleBlock,
@@ -89,7 +92,14 @@ import {
   type WireRunDraft2D,
 } from "./model";
 
-const APP_VERSION = "0.3.60";
+const APP_VERSION = "0.3.66";
+
+const TEXT_FONT_OPTIONS = [
+  { value: "Arial, sans-serif", label: "Arial" },
+  { value: '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif', label: "고딕" },
+  { value: '"Times New Roman", serif', label: "명조" },
+  { value: '"Courier New", monospace', label: "고정폭" },
+];
 
 type HistoryState = {
   past: Project2D[];
@@ -152,6 +162,8 @@ export default function App2D() {
   const workspaceSignatureRef = useRef(initialWorkspace ? JSON.stringify([initialWorkspace.project, initialWorkspace.savedDocument, initialWorkspace.filePath]) : "");
   const project = history.present;
   const harness = project.harnesses.find((item) => item.id === activeHarnessId) ?? project.harnesses[0];
+  const documentIndex = useMemo(() => projectDocumentIndex(project), [project]);
+  const isHarnessSheet = (harness.sheetType ?? "harness") === "harness";
   const editingStepAnnotation = editingStepAnnotationId
     ? harness.drawing.annotations?.find((annotation) => annotation.id === editingStepAnnotationId && annotation.kind === "step")
     : undefined;
@@ -726,14 +738,15 @@ export default function App2D() {
   }, [commit, project]);
 
   const removeHarness = useCallback((harnessId: string) => {
-    const index = project.harnesses.findIndex((item) => item.id === harnessId);
-    const removed = project.harnesses[index];
-    if (!removed || project.harnesses.length <= 1) return;
-    if (!window.confirm(`${removed.partNumber} 하네스 도면을 삭제하시겠습니까?`)) return;
+    const removed = project.harnesses.find((item) => item.id === harnessId);
+    if (!removed) return;
+    const removedType = removed.sheetType ?? "harness";
+    if (removedType === "harness" && project.harnesses.filter((sheet) => !sheet.sheetType || sheet.sheetType === "harness").length <= 1) return;
+    if (!window.confirm(`${removed.partNumber} ${removedType === "harness" ? "하네스 도면" : "문서"}을 삭제하시겠습니까?`)) return;
 
     const next = deleteHarness(project, harnessId);
     const nextActiveId = activeHarnessId === harnessId
-      ? next.harnesses[Math.min(index, next.harnesses.length - 1)].id
+      ? (next.harnesses.find((sheet) => (sheet.sheetType ?? "harness") === removedType) ?? next.harnesses[0]).id
       : activeHarnessId;
     commit(next);
     setActiveHarnessId(nextActiveId);
@@ -842,6 +855,13 @@ export default function App2D() {
   const selectedAnnotation = selectedAnnotationId
     ? harness.drawing.annotations?.find((annotation) => annotation.id === selectedAnnotationId)
     : undefined;
+  const selectedTextAnnotation = selectedAnnotation && (selectedAnnotation.kind === "label" || selectedAnnotation.kind === "text")
+    ? selectedAnnotation
+    : undefined;
+  const updateSelectedTextAnnotation = (changes: Partial<Omit<DrawingAnnotation2D, "id" | "kind">>) => {
+    if (!selectedTextAnnotation) return;
+    apply((current) => updateDrawingAnnotation(current, harness.id, selectedTextAnnotation.id, changes));
+  };
   const selectedHeatShrink = selectedHeatShrinkId
     ? harness.drawing.cableHeatShrinks?.find((heatShrink) => heatShrink.id === selectedHeatShrinkId)
     : undefined;
@@ -925,7 +945,7 @@ export default function App2D() {
       <button type="button" disabled={history.past.length === 0} onClick={undo} title="실행 취소 (⌘/Ctrl+Z)"><Undo2 size={15} /></button>
       <button type="button" disabled={history.future.length === 0} onClick={redo} title="다시 실행 (⌘/Ctrl+Shift+Z)"><Redo2 size={15} /></button>
       <span className="hd2-separator" />
-      <button type="button" className="is-primary" onClick={() => setPartDialogKind("housing")}><Plus size={15} />부품 추가</button>
+      <button type="button" className="is-primary" disabled={!isHarnessSheet} onClick={() => setPartDialogKind("housing")}><Plus size={15} />부품 추가</button>
       <button type="button" disabled={!selectedCableRun} onClick={() => {
         if (!selectedCableRun) return;
         const result = addCableHeatShrink(project, harness.id, selectedCableRun.id);
@@ -954,8 +974,38 @@ export default function App2D() {
           event.currentTarget.value = "";
         }}
       />
+      {selectedTextAnnotation && <>
+        <span className="hd2-separator" />
+        <div className="hd2-text-tools" aria-label="텍스트 서식 도구">
+          <select
+            aria-label="텍스트 글꼴"
+            title="글꼴"
+            value={selectedTextAnnotation.fontFamily ?? "Arial, sans-serif"}
+            onChange={(event) => updateSelectedTextAnnotation({ fontFamily: event.target.value })}
+          >{TEXT_FONT_OPTIONS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select>
+          <input
+            aria-label="텍스트 도구 글자 크기"
+            title="글자 크기"
+            type="number"
+            min="6"
+            max="144"
+            value={selectedTextAnnotation.fontSize}
+            onChange={(event) => updateSelectedTextAnnotation({ fontSize: Math.max(6, Number(event.target.value) || 6) })}
+          />
+          <label title="글자 색상"><span>A</span><input aria-label="텍스트 도구 글자 색상" type="color" value={selectedTextAnnotation.textColor} onChange={(event) => updateSelectedTextAnnotation({ textColor: event.target.value })} /></label>
+          <button type="button" className={selectedTextAnnotation.italic ? "is-active" : ""} aria-label="기울임" aria-pressed={Boolean(selectedTextAnnotation.italic)} title="기울임" onClick={() => updateSelectedTextAnnotation({ italic: !selectedTextAnnotation.italic })}><Italic size={14} /></button>
+          <button type="button" className={selectedTextAnnotation.underline ? "is-active" : ""} aria-label="밑줄" aria-pressed={Boolean(selectedTextAnnotation.underline)} title="밑줄" onClick={() => updateSelectedTextAnnotation({ underline: !selectedTextAnnotation.underline })}><Underline size={14} /></button>
+          <span className="hd2-text-background" title="글자 바탕 색상"><span>Aa</span><input aria-label="글자 바탕 색상" type="color" value={selectedTextAnnotation.kind === "label" ? selectedTextAnnotation.fillColor : selectedTextAnnotation.textBackgroundColor ?? "#ffffff"} onChange={(event) => updateSelectedTextAnnotation(selectedTextAnnotation.kind === "label" ? { fillColor: event.target.value } : { textBackgroundColor: event.target.value })} /></span>
+          {selectedTextAnnotation.kind === "text" && <button type="button" className="hd2-text-background-clear" aria-label="글자 바탕 없음" title="글자 바탕 없음" onClick={() => updateSelectedTextAnnotation({ textBackgroundColor: undefined })}>없음</button>}
+          {(["left", "center", "right"] as const).map((align) => {
+            const Icon = align === "left" ? AlignLeft : align === "center" ? AlignCenter : AlignRight;
+            const currentAlign = selectedTextAnnotation.textAlign ?? (selectedTextAnnotation.kind === "label" ? "center" : "left");
+            return <button key={align} type="button" className={currentAlign === align ? "is-active" : ""} aria-label={`글자 ${align === "left" ? "왼쪽" : align === "center" ? "가운데" : "오른쪽"} 정렬`} aria-pressed={currentAlign === align} title={`${align === "left" ? "왼쪽" : align === "center" ? "가운데" : "오른쪽"} 정렬`} onClick={() => updateSelectedTextAnnotation({ textAlign: align })}><Icon size={14} /></button>;
+          })}
+        </div>
+      </>}
       <button type="button" disabled={!selectedAnnotationId && !selectedLabel && selection.componentIds.length === 0} onClick={rotateSelection} title="선택 90° 회전 (R)"><RotateCw size={15} />선택 90° 회전</button>
-      <span className="hd2-help"><CircleHelp size={14} />좌측 하네스 선택 후 C·V 전체 도면 복제 · Cmd/Ctrl+A 캔버스 전체 선택 · Space+드래그 화면 이동</span>
+      {!selectedTextAnnotation && <span className="hd2-help"><CircleHelp size={14} />좌측 하네스 선택 후 C·V 전체 도면 복제 · Cmd/Ctrl+A 캔버스 전체 선택 · Space+드래그 화면 이동</span>}
       <button type="button" disabled={!selectedHeatShrinkId && !selectedAnnotationId && selection.componentIds.length + selection.connectionIds.length + selection.cableRunIds.length === 0} onClick={removeSelection}><Trash2 size={15} />선택 삭제</button>
     </div>
 
@@ -991,7 +1041,7 @@ export default function App2D() {
           setSelection({ componentIds: [], connectionIds: [], cableRunIds: [cableRunId] });
         }}
       />
-      <section className="hd2-document">
+      <section className={`hd2-document${isHarnessSheet ? "" : " is-front-matter"}`}>
         <SheetTabs
           sheets={project.harnesses}
           openSheetIds={openHarnessIds}
@@ -1006,6 +1056,7 @@ export default function App2D() {
           harness={harness}
           projectNumber={project.projectNumber}
           projectName={project.name}
+          documentIndex={documentIndex}
           settings={settings}
           selection={selection}
           selectedLabel={selectedLabel}
@@ -1050,6 +1101,7 @@ export default function App2D() {
           onRenameConnection={(connectionId, reference) => apply((current) => updateConnection(current, harness.id, connectionId, { reference }))}
           onUpdateProjectMetadata={(changes) => apply((current) => updateProjectMetadata(current, changes))}
           onUpdateHarnessMetadata={(changes) => apply((current) => updateHarnessMetadata(current, harness.id, changes))}
+          onUpdateIndexedSheet={(sheetId, changes) => apply((current) => updateHarnessMetadata(current, sheetId, changes))}
           onUpdateTitleBlock={(changes) => apply((current) => updateDrawingTitleBlock(current, harness.id, changes))}
           onUpdateAnnotation={(annotationId, changes) => apply((current) => updateDrawingAnnotation(current, harness.id, annotationId, changes))}
           onUpdateHeatShrink={(heatShrinkId, changes) => apply((current) => updateCableHeatShrink(current, harness.id, heatShrinkId, changes))}
@@ -1068,12 +1120,12 @@ export default function App2D() {
             }
           }}
         />
-        <PinMap project={project} harnessId={harness.id} onSelect={(connectionId) => {
+        {isHarnessSheet && <PinMap project={project} harnessId={harness.id} onSelect={(connectionId) => {
           setSelectedHarnessId(null);
           setSelection({ componentIds: [], connectionIds: [connectionId], cableRunIds: [] });
           setSelectedLabel(null);
           setSelectedAnnotationId(null);
-        }} />
+        }} />}
       </section>
       <Inspector
         project={project}
@@ -1087,7 +1139,7 @@ export default function App2D() {
         onChange={apply}
         onApplyCommonMetadata={() => {
           apply((current) => applyDrawingMetadataToAllHarnesses(current, harness.id));
-          setMessage(`${project.harnesses.length}개 하네스 도면에 공통 정보를 적용했습니다.`);
+          setMessage(`${project.harnesses.filter((sheet) => !sheet.sheetType || sheet.sheetType === "harness").length}개 하네스 도면에 공통 정보를 적용했습니다.`);
         }}
         onEditStepDrawing={() => {
           if (!selectedAnnotation || selectedAnnotation.kind !== "step") return;
@@ -1298,6 +1350,7 @@ function Navigator({ project, activeHarnessId, selectedHarnessId, selectedFolder
   });
   const renderNodes = (parentId: string | null, depth = 0): ReactNode => nodes.filter((node) => node.parentId === parentId).map((node) => {
     const harness = node.kind === "harness" ? project.harnesses.find((item) => item.id === node.harnessId) : undefined;
+    const sheetType = harness?.sheetType ?? "harness";
     const isFolder = node.kind === "folder";
     const isExpanded = isFolder && expandedFolders.has(node.id);
     const isEditing = editing?.id === node.id;
@@ -1309,7 +1362,7 @@ function Navigator({ project, activeHarnessId, selectedHarnessId, selectedFolder
         data-tree-item-id={node.id}
         role="button"
         tabIndex={0}
-        aria-label={isFolder ? `${node.name} 폴더` : `${harness?.partNumber} 하네스 도면`}
+        aria-label={isFolder ? `${node.name} 폴더` : `${harness?.partNumber} ${sheetType === "cover" ? "표지" : sheetType === "toc" ? "목차" : "하네스 도면"}`}
         onClick={() => isFolder ? onSelectFolder(node.id) : harness && onSelectHarness(harness.id)}
         onDoubleClick={() => startRename(node)}
         onContextMenu={(event) => {
@@ -1323,7 +1376,7 @@ function Navigator({ project, activeHarnessId, selectedHarnessId, selectedFolder
         }}
       >
         {isFolder ? <button type="button" className="hd2-tree-toggle" aria-label={`${node.name} ${isExpanded ? "접기" : "펼치기"}`} onClick={(event) => { event.stopPropagation(); toggleFolder(node.id); }}>{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button> : <ChevronRight size={14} />}
-        {isFolder ? <Folder size={15} /> : <Cable size={15} />}
+        {isFolder ? <Folder size={15} /> : sheetType === "cover" ? <FileText size={15} /> : sheetType === "toc" ? <BookOpen size={15} /> : <Cable size={15} />}
         {isEditing ? <input autoFocus aria-label="이름 수정" value={editing.value} onClick={(event) => event.stopPropagation()} onChange={(event) => setEditing({ ...editing, value: event.target.value })} onBlur={finishRename} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") finishRename(); else if (event.key === "Escape") setEditing(null); }} /> : <>{harness && <strong>{harness.partNumber}</strong>}<span>{isFolder ? node.name : harness?.name}</span></>}
       </div>
       {isFolder && isExpanded && renderNodes(node.id, depth + 1)}
@@ -1338,13 +1391,13 @@ function Navigator({ project, activeHarnessId, selectedHarnessId, selectedFolder
   return <aside className="hd2-navigator">
     <h2>프로젝트</h2>
     <div className="hd2-project-summary"><strong>{project.projectNumber}</strong><span>{project.name}</span></div>
-    <div className="hd2-tree-heading">하네스 <b>{project.harnesses.length}</b><button type="button" aria-label="새 최상위 폴더 생성" title="새 폴더" onClick={() => onAddFolder(null)}><FolderPlus size={13} /></button><button type="button" aria-label="새 하네스 도면 생성" title="새 하네스" onClick={() => onAddHarness(null)}><Plus size={13} /></button><button type="button" aria-label="선택한 하네스 도면 삭제" title="선택 항목 삭제" disabled={(!selectedHarnessId || project.harnesses.length <= 1) && !selectedFolderId} onClick={() => selectedFolderId ? onDeleteFolder(selectedFolderId) : selectedHarnessId && onDeleteHarness(selectedHarnessId)}><Trash2 size={13} /></button></div>
+    <div className="hd2-tree-heading">문서 <b>{project.harnesses.length}</b><button type="button" aria-label="새 최상위 폴더 생성" title="새 폴더" onClick={() => onAddFolder(null)}><FolderPlus size={13} /></button><button type="button" aria-label="새 하네스 도면 생성" title="새 하네스" onClick={() => onAddHarness(null)}><Plus size={13} /></button><button type="button" aria-label="선택한 하네스 도면 삭제" title="선택 항목 삭제" disabled={!selectedFolderId && (!selectedHarnessId || ((project.harnesses.find((sheet) => sheet.id === selectedHarnessId)?.sheetType ?? "harness") === "harness" && project.harnesses.filter((sheet) => !sheet.sheetType || sheet.sheetType === "harness").length <= 1))} onClick={() => selectedFolderId ? onDeleteFolder(selectedFolderId) : selectedHarnessId && onDeleteHarness(selectedHarnessId)}><Trash2 size={13} /></button></div>
     <div className={`hd2-tree-root${draggingItemId ? " is-dragging" : ""}`}>{renderNodes(null)}</div>
     {contextMenu && <div className="hd2-tree-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
       {contextMenu.node.kind === "folder" && <button type="button" role="menuitem" onClick={() => { onAddFolder(contextMenu.node.id); setExpandedFolders((current) => new Set(current).add(contextMenu.node.id)); setContextMenu(null); }}><FolderPlus size={13} />하위 폴더 만들기</button>}
       {contextMenu.node.kind === "folder" && <button type="button" role="menuitem" onClick={() => { onAddHarness(contextMenu.node.id); setExpandedFolders((current) => new Set(current).add(contextMenu.node.id)); setContextMenu(null); }}><Plus size={13} />하네스 만들기</button>}
       <button type="button" role="menuitem" onClick={() => { const node = contextMenu.node; setContextMenu(null); window.requestAnimationFrame(() => startRename(node)); }}><Pencil size={13} />이름 바꾸기</button>
-      <button type="button" role="menuitem" disabled={contextMenu.node.kind === "harness" && project.harnesses.length <= 1} onClick={() => { contextMenu.node.kind === "folder" ? onDeleteFolder(contextMenu.node.id) : onDeleteHarness(contextMenu.node.harnessId); setContextMenu(null); }}><Trash2 size={13} />삭제</button>
+      <button type="button" role="menuitem" disabled={contextMenu.node.kind === "harness" ? (project.harnesses.find((sheet) => sheet.id === contextMenu.node.id)?.sheetType ?? "harness") === "harness" && project.harnesses.filter((sheet) => !sheet.sheetType || sheet.sheetType === "harness").length <= 1 : false} onClick={() => { contextMenu.node.kind === "folder" ? onDeleteFolder(contextMenu.node.id) : onDeleteHarness(contextMenu.node.harnessId); setContextMenu(null); }}><Trash2 size={13} />삭제</button>
     </div>}
   </aside>;
 }
@@ -1416,14 +1469,21 @@ function Inspector({ project, harnessId, selectedComponent, selectedConnection, 
       <div className="hd2-pin-editor"><h3>PIN DEFINITION · {selectedComponent.pins.length}</h3>{selectedComponent.pins.map((pin) => <div key={pin.id}><input aria-label={`${pin.number}번 핀 번호`} value={pin.number} onChange={(event) => onChange((current) => updatePin(current, harnessId, selectedComponent.id, pin.id, { number: event.target.value }))} /><input aria-label={`${pin.number}번 핀 이름`} value={pin.name} onChange={(event) => onChange((current) => updatePin(current, harnessId, selectedComponent.id, pin.id, { name: event.target.value }))} /></div>)}</div>
     </aside>;
   }
-  if (selectedCableRun) return <aside className="hd2-inspector">
+  if (selectedCableRun) {
+    const cableConnections = harness.connections.filter((connection) => connection.cableRunId === selectedCableRun.id);
+    const fromStripLengthMm = cableConnections.find((connection) => connection.from.freeEnd)?.from.freeEnd?.stripLengthMm;
+    const toStripLengthMm = cableConnections.find((connection) => connection.to.freeEnd)?.to.freeEnd?.stripLengthMm;
+    return <aside className="hd2-inspector">
     <h2>속성 <span>MULTICORE CABLE</span></h2>
     <InspectorField label="케이블 참조" value={selectedCableRun.reference} onChange={(value) => onChange((current) => updateCableRun(current, harnessId, selectedCableRun.id, { reference: value }))} />
     <InspectorField label="파트명" value={selectedCableRun.name} onChange={() => {}} readOnly />
     <InspectorField label="파트번호" value={selectedCableRun.partNumber} onChange={() => {}} readOnly />
     <InspectorNumberField label="길이" unit={lengthUnit} value={selectedCableRun.lengthMm} onChange={(value) => onChange((current) => updateCableRun(current, harnessId, selectedCableRun.id, { lengthMm: value }))} />
+    {fromStripLengthMm !== undefined && <InspectorNumber label="From 탈피 길이 (mm)" value={fromStripLengthMm} minimum={0} onChange={(value) => onChange((current) => updateCableRunStripLength(current, harnessId, selectedCableRun.id, "from", value))} />}
+    {toStripLengthMm !== undefined && <InspectorNumber label="To 탈피 길이 (mm)" value={toStripLengthMm} minimum={0} onChange={(value) => onChange((current) => updateCableRunStripLength(current, harnessId, selectedCableRun.id, "to", value))} />}
     <div className="hd2-engine-note"><strong>{selectedCableRun.cores.length} CORE · Ø{selectedCableRun.outerDiameterMm} mm</strong><p>외피는 cableRunId가 같은 사용 코어만 묶어 표시합니다.</p></div>
   </aside>;
+  }
   if (selectedConnection) {
     const color = splitWireColor(selectedConnection.color);
     return <aside className="hd2-inspector">
@@ -1433,6 +1493,8 @@ function Inspector({ project, harnessId, selectedComponent, selectedConnection, 
     <label className="hd2-field"><span>보조 색상</span><select value={color.secondary} onChange={(event) => onChange((current) => updateConnection(current, harnessId, selectedConnection.id, { color: joinWireColor(color.primary, event.target.value) }))}><option value="">없음</option>{WIRE_COLOR_CODES.map((item) => <option key={item}>{item}</option>)}</select></label>
     <InspectorField label="규격" value={selectedConnection.gauge} onChange={(value) => onChange((current) => updateConnection(current, harnessId, selectedConnection.id, { gauge: value }))} />
     <InspectorNumberField label="길이" unit={lengthUnit} value={selectedConnection.lengthMm} onChange={(value) => onChange((current) => updateConnection(current, harnessId, selectedConnection.id, { lengthMm: value }))} />
+    {selectedConnection.from.freeEnd && <InspectorNumber label="From 탈피 길이 (mm)" value={selectedConnection.from.freeEnd.stripLengthMm} minimum={0} onChange={(value) => onChange((current) => updateConnectionStripLength(current, harnessId, selectedConnection.id, "from", value))} />}
+    {selectedConnection.to.freeEnd && <InspectorNumber label="To 탈피 길이 (mm)" value={selectedConnection.to.freeEnd.stripLengthMm} minimum={0} onChange={(value) => onChange((current) => updateConnectionStripLength(current, harnessId, selectedConnection.id, "to", value))} />}
     <label className="hd2-field hd2-field--stack"><span>Notes</span><textarea value={selectedConnection.notes} onChange={(event) => onChange((current) => updateConnection(current, harnessId, selectedConnection.id, { notes: event.target.value }))} /></label>
   </aside>;
   }

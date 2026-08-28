@@ -12,6 +12,14 @@ type EditorMode = "select" | "pins" | "rotate" | "color";
 type ViewBox2D = Rectangle2D;
 type ParsedSource2D = ParsedDxf2D | ParsedRaster2D;
 const DEFAULT_SYMBOL_MAX_SIZE = 40;
+const STEP_STANDARD_VIEWS: Array<{ name: string; rotation: StepDrawingRotation }> = [
+  { name: "정면", rotation: { x: 0, y: 0, z: 0 } },
+  { name: "후면", rotation: { x: 0, y: 180, z: 0 } },
+  { name: "좌측", rotation: { x: 0, y: -90, z: 0 } },
+  { name: "우측", rotation: { x: 0, y: 90, z: 0 } },
+  { name: "상면", rotation: { x: -90, y: 0, z: 0 } },
+  { name: "하면", rotation: { x: 90, y: 0, z: 0 } },
+];
 
 export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: {
   draft: LibraryPartDraft2D;
@@ -96,16 +104,22 @@ export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: 
     setStepSurfaceColors((current) => ({ ...current, [String(activeStepSurface)]: color }));
   };
 
-  const updateStepRotation = (axis: keyof StepDrawingRotation, value: number) => {
-    if (!stepAsset || !Number.isFinite(value)) return;
-    const rotation = { ...stepRotation, [axis]: value };
-    setStepRotation(rotation);
+  const applyStepRotation = (rotation: StepDrawingRotation) => {
+    if (!stepAsset) return;
     try {
-      setParsed(projectStepDrawing(stepAsset, rotation));
+      const loaded = projectStepDrawing(stepAsset, rotation);
+      setStepRotation(rotation);
+      setParsed(loaded);
+      setViewBox((current) => centerViewBoxOnBounds(current, loaded.bounds));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
+  };
+
+  const updateStepRotation = (axis: keyof StepDrawingRotation, value: number) => {
+    if (!Number.isFinite(value)) return;
+    applyStepRotation({ ...stepRotation, [axis]: normalizeDegrees(value) });
   };
 
   const pasteClipboardImage = async () => {
@@ -201,11 +215,14 @@ export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: 
         event.clientX - stepDrag.clientX,
         event.clientY - stepDrag.clientY,
         stepDrag.zOnly,
+        0.4,
+        event.altKey,
       );
       try {
         const loaded = projectStepDrawing(stepAsset, rotation);
         setStepRotation(rotation);
         setParsed(loaded);
+        setViewBox((current) => centerViewBoxOnBounds(current, loaded.bounds));
         setError("");
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -345,7 +362,8 @@ export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: 
         {purpose === "part" && <button type="button" className={mode === "pins" ? "is-selected" : ""} onClick={() => setMode("pins")}><Focus size={14} />핀 배치</button>}
         {purpose === "part" && <button type="button" onClick={autoPlacePins}>핀 자동 배치</button>}
         <button type="button" onClick={() => parsed && setViewBox(padBounds(parsed.bounds, 0.035))}>전체 보기</button>
-        {stepAsset && <div className="hd2-symbol-step-rotation"><b>STEP 각도</b>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input aria-label={`STEP ${axis.toUpperCase()} 회전`} type="number" step="5" value={stepRotation[axis]} onChange={(event) => updateStepRotation(axis, Number(event.target.value))} /><em>°</em></label>)}</div>}
+        {stepAsset && <div className="hd2-step-standard-views" role="group" aria-label="STEP 기준면"><b>기준면</b>{STEP_STANDARD_VIEWS.map((view) => <button type="button" key={view.name} className={sameStepRotation(stepRotation, view.rotation) ? "is-selected" : ""} onClick={() => applyStepRotation({ ...view.rotation })}>{view.name}</button>)}</div>}
+        {stepAsset && <div className="hd2-symbol-step-rotation"><b>미세 조정</b>{(["x", "y", "z"] as const).map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><button type="button" aria-label={`STEP ${axis.toUpperCase()} -5도`} onClick={() => updateStepRotation(axis, stepRotation[axis] - 5)}>−</button><input aria-label={`STEP ${axis.toUpperCase()} 회전`} type="number" step="1" value={stepRotation[axis]} onChange={(event) => updateStepRotation(axis, Number(event.target.value))} /><button type="button" aria-label={`STEP ${axis.toUpperCase()} +5도`} onClick={() => updateStepRotation(axis, stepRotation[axis] + 5)}>+</button><em>°</em></label>)}</div>}
         {stepAsset && <div className="hd2-symbol-render-mode"><b>표현</b><button type="button" className={stepRenderMode === "shaded" ? "is-selected" : ""} onClick={() => setStepRenderMode("shaded")}>음영</button><button type="button" className={stepRenderMode === "technical" ? "is-selected" : ""} onClick={() => setStepRenderMode("technical")}>기술도면</button></div>}
         {parsed && parsed.paths.length > 0 && <label className="hd2-symbol-outline-strength"><span>선 강도</span><input aria-label="윤곽선 강도" type="range" min="0.5" max="4" step="0.1" value={outlineStrength} onChange={(event) => setOutlineStrength(Number(event.target.value))} /><b>{outlineStrength.toFixed(1)}×</b></label>}
         <span>{parsed ? isParsedRaster(parsed) ? `${parsed.sourceName} · 이미지` : `${parsed.sourceName} · 형상 ${parsed.paths.length}개` : "도면 또는 STEP 파일을 불러오거나 이미지를 붙여넣으세요."}</span>
@@ -400,7 +418,7 @@ export function PartSymbolEditor({ draft, onApply, onClose, purpose = "part" }: 
               <text x={point.x + strokeWidth * 8} y={point.y - strokeWidth * 8} style={{ fontSize: strokeWidth * 11 }}>{draft.pins[index].number}</text>
             </g>)}
           </svg> : <div className="hd2-symbol-empty"><FileUp size={40} /><strong>DXF, 이미지 또는 STEP 파일을 불러오세요.</strong><span>STEP은 마우스로 각도를 맞춘 뒤 필요한 영역을 선택할 수 있습니다.</span></div>}
-          {stepAsset && mode === "rotate" && <div className="hd2-step-gesture-help"><Rotate3D size={14} /><span><b>드래그</b> X/Y 회전</span><span><b>Shift + 드래그</b> Z 회전</span></div>}
+          {stepAsset && mode === "rotate" && <div className="hd2-step-gesture-help"><Rotate3D size={14} /><span><b>드래그</b> 가로 Y / 세로 X · 5° 스냅</span><span><b>Shift</b> Z 회전</span><span><b>Alt</b> 미세 회전</span></div>}
         </div>
         <aside>
           <section><h3>1. 투상도 영역</h3><p>필요한 커넥터 투상도를 사각형으로 감싸세요. 도면 테두리와 표는 영역 밖으로 제외합니다.</p>{selection && <dl><dt>원본 폭</dt><dd>{Math.abs(selection.width).toFixed(3)}</dd><dt>원본 높이</dt><dd>{Math.abs(selection.height).toFixed(3)}</dd></dl>}</section>
@@ -426,17 +444,33 @@ export function stepRotationFromDrag(
   deltaY: number,
   zOnly: boolean,
   degreesPerPixel = 0.4,
+  fine = false,
 ): StepDrawingRotation {
-  if (zOnly) return { ...initial, z: normalizeDegrees(initial.z + deltaX * degreesPerPixel) };
-  return {
-    x: normalizeDegrees(initial.x + deltaY * degreesPerPixel),
-    y: normalizeDegrees(initial.y + deltaX * degreesPerPixel),
-    z: initial.z,
-  };
+  const snapDelta = (delta: number) => fine ? delta : Math.round(delta / 5) * 5;
+  if (zOnly) return { ...initial, z: normalizeDegrees(initial.z + snapDelta(deltaX * degreesPerPixel)) };
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return { ...initial, y: normalizeDegrees(initial.y + snapDelta(deltaX * degreesPerPixel)) };
+  }
+  return { ...initial, x: normalizeDegrees(initial.x + snapDelta(deltaY * degreesPerPixel)) };
+}
+
+function sameStepRotation(left: StepDrawingRotation, right: StepDrawingRotation) {
+  return normalizeDegrees(left.x) === normalizeDegrees(right.x)
+    && normalizeDegrees(left.y) === normalizeDegrees(right.y)
+    && normalizeDegrees(left.z) === normalizeDegrees(right.z);
 }
 
 function normalizeDegrees(value: number) {
   return Math.round(((((value + 180) % 360) + 360) % 360 - 180) * 10) / 10;
+}
+
+function centerViewBoxOnBounds(current: ViewBox2D, bounds: Rectangle2D): ViewBox2D {
+  return {
+    x: bounds.x + bounds.width / 2 - current.width / 2,
+    y: bounds.y + bounds.height / 2 - current.height / 2,
+    width: current.width,
+    height: current.height,
+  };
 }
 
 function existingDrawingAsParsed(draft: LibraryPartDraft2D) {

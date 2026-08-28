@@ -65,9 +65,11 @@ describe("부품 심벌 도면 입력", () => {
     expect(await screen.findByText("클립보드 이미지.png · 이미지")).toBeInTheDocument();
   });
 
-  it("STEP 마우스 드래그를 X/Y 또는 Z 회전값으로 변환한다", () => {
-    expect(stepRotationFromDrag({ x: 0, y: 0, z: 0 }, 100, -50, false)).toEqual({ x: -20, y: 40, z: 0 });
+  it("STEP 마우스 드래그를 주축 5도 스냅 또는 미세 회전값으로 변환한다", () => {
+    expect(stepRotationFromDrag({ x: 0, y: 0, z: 0 }, 100, -50, false)).toEqual({ x: 0, y: 40, z: 0 });
+    expect(stepRotationFromDrag({ x: 0, y: 0, z: 0 }, 5, 19, false)).toEqual({ x: 10, y: 0, z: 0 });
     expect(stepRotationFromDrag({ x: 10, y: 20, z: 30 }, 50, 80, true)).toEqual({ x: 10, y: 20, z: 50 });
+    expect(stepRotationFromDrag({ x: 0, y: 0, z: 0 }, 11, 2, false, 0.4, true)).toEqual({ x: 0, y: 4.4, z: 0 });
   });
 
   it("메인 도면용 STEP에 회전 가이드를 표시하고 R 키로 90도 회전한다", async () => {
@@ -94,9 +96,13 @@ describe("부품 심벌 도면 입력", () => {
 
     fireEvent.change(container.querySelector("input[type=file]")!, { target: { files: [file] } });
     expect(await screen.findByLabelText("STEP 회전 가이드")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "우측" }));
+    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 0, y: 90, z: 0 }));
+    fireEvent.click(screen.getByRole("button", { name: "STEP X +5도" }));
+    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 5, y: 90, z: 0 }));
     const canvas = container.querySelector<SVGSVGElement>(".hd2-symbol-canvas > svg")!;
     fireEvent.keyDown(canvas, { key: "r" });
-    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 0, y: 0, z: 90 }));
+    await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 5, y: 90, z: 90 }));
     fireEvent.click(screen.getByRole("button", { name: "도면에 추가" }));
 
     await waitFor(() => expect(onApply).toHaveBeenCalled());
@@ -104,11 +110,11 @@ describe("부품 심벌 도면 입력", () => {
     expect(onApply.mock.calls[0][0].drawing.editorState.stepAsset).toMatchObject({ sourceDataBase64: "AQ==", meshes: [] });
   });
 
-  it("STEP 회전 중 사용자가 확대한 뷰포인트를 유지한다", async () => {
+  it("STEP 회전 중 확대율을 유지하고 새 투영 형상을 화면 중앙에 맞춘다", async () => {
     stepMocks.importStepAsset.mockResolvedValue({ id: "step", name: "part", sourceFormat: "step", sourceName: "part.step", sourceDataBase64: "", meshes: [] });
     stepMocks.projectStepDrawing.mockImplementation((_asset, rotation: { y: number }) => ({
       sourceName: "part.step · STEP 투영",
-      bounds: rotation.y === 0 ? { x: 0, y: 0, width: 100, height: 80 } : { x: -40, y: -30, width: 180, height: 140 },
+      bounds: rotation.y === 0 ? { x: 0, y: 0, width: 100, height: 80 } : { x: 20, y: 10, width: 180, height: 140 },
       paths: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 80 }], closed: false, layer: "STEP_PROJECTION", sourceType: "STEP_EDGE" }],
       surfaces: [],
       unsupported: [],
@@ -122,11 +128,15 @@ describe("부품 심벌 도면 입력", () => {
     const canvas = container.querySelector<SVGSVGElement>(".hd2-symbol-canvas > svg")!;
     vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON: () => ({}) });
     fireEvent.wheel(canvas, { deltaY: -100, clientX: 400, clientY: 300 });
-    const zoomedViewBox = canvas.getAttribute("viewBox");
+    const zoomedViewBox = canvas.getAttribute("viewBox")!.split(" ").map(Number);
 
     fireEvent.change(screen.getByLabelText("STEP Y 회전"), { target: { value: "45" } });
     await waitFor(() => expect(stepMocks.projectStepDrawing).toHaveBeenLastCalledWith(expect.anything(), { x: 0, y: 45, z: 0 }));
-    expect(canvas.getAttribute("viewBox")).toBe(zoomedViewBox);
+    const centeredViewBox = canvas.getAttribute("viewBox")!.split(" ").map(Number);
+    expect(centeredViewBox[2]).toBe(zoomedViewBox[2]);
+    expect(centeredViewBox[3]).toBe(zoomedViewBox[3]);
+    expect(centeredViewBox[0] + centeredViewBox[2] / 2).toBe(110);
+    expect(centeredViewBox[1] + centeredViewBox[3] / 2).toBe(80);
   });
 
   it("등록된 벡터 도면을 수정할 때 윤곽선 강도를 표시하고 저장한다", async () => {
@@ -203,7 +213,7 @@ describe("부품 심벌 도면 입력", () => {
     fireEvent.click(screen.getByRole("button", { name: "마우스 회전" }));
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 120, clientY: 110 });
-    expect(canvas).toHaveAttribute("viewBox", "-5 -10 100 80");
+    expect(canvas).toHaveAttribute("viewBox", "-10 -10 100 80");
     expect(container.querySelector(".hd2-symbol-selection")).toBeInTheDocument();
     expect(container.querySelector(".hd2-symbol-pin")).toBeInTheDocument();
 
